@@ -1,0 +1,7 @@
+{
+  "repo_purpose": "Web API backend",
+  "pr_title": "Refactor user views",
+  "pr_description": "Clean up user view module and remove unused imports.",
+  "files_changed": ["app/views/user.py"],
+  "author": "dev-alice"
+}

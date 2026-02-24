@@ -1,0 +1,7 @@
+{
+  "repo_purpose": "API service",
+  "pr_title": "Add auth logging",
+  "pr_description": "Add logging to the authentication handler for debugging auth failures in production.",
+  "files_changed": ["app/auth/handler.py"],
+  "author": "dev-dave"
+}

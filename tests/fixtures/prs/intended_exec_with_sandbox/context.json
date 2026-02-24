@@ -1,0 +1,7 @@
+{
+  "repo_purpose": "AI coding agent",
+  "pr_title": "Add Python executor",
+  "pr_description": "Implements sandboxed Python code execution using Docker containers with memory limits, network isolation, and read-only filesystem.",
+  "files_changed": ["sandbox/executor.py"],
+  "author": "dev-carol"
+}

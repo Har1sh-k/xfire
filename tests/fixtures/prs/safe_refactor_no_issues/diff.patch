@@ -1,0 +1,36 @@
+diff --git a/utils/strings.py b/utils/strings.py
+index 1d2e3f4..a5b6c7d 100644
+--- a/utils/strings.py
++++ b/utils/strings.py
+@@ -1,14 +1,20 @@
+-def process(s):
+-    """Process a string."""
+-    s = s.strip()
+-    s = s.lower()
+-    parts = s.split(" ")
+-    parts = [p for p in parts if p]
+-    result = "-".join(parts)
+-    return result
+-
+-
+-def check(s):
+-    """Check if string is valid."""
+-    if s and len(s) > 0 and len(s) < 256:
++def slugify(text: str) -> str:
++    """Convert a string to a URL-friendly slug."""
++    normalized = _normalize_whitespace(text.strip().lower())
++    parts = normalized.split(" ")
++    return "-".join(parts)
++
++
++def is_valid_label(text: str) -> bool:
++    """Check if a string is a valid label (non-empty, under 256 chars)."""
++    if text and 0 < len(text) < 256:
+         return True
+     return False
++
++
++def _normalize_whitespace(text: str) -> str:
++    """Collapse consecutive whitespace into single spaces."""
++    parts = text.split()
++    return " ".join(parts)

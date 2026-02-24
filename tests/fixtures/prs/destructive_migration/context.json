@@ -1,0 +1,7 @@
+{
+  "repo_purpose": "Web application",
+  "pr_title": "Clean up legacy tables",
+  "pr_description": "Remove legacy user tables that are no longer referenced by the application after the auth migration.",
+  "files_changed": ["migrations/versions/20260115_drop_legacy.py"],
+  "author": "dev-eve"
+}

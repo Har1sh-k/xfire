@@ -1,0 +1,28 @@
+diff --git a/migrations/versions/20260115_drop_legacy.py b/migrations/versions/20260115_drop_legacy.py
+new file mode 100644
+index 0000000..f3a7c89
+--- /dev/null
++++ b/migrations/versions/20260115_drop_legacy.py
+@@ -0,0 +1,22 @@
++"""Drop legacy user tables."""
++
++revision = 'a1b2c3d4e5f6'
++down_revision = '9f8e7d6c5b4a'
++
++from alembic import op
++
++
++def upgrade():
++    op.drop_table('users')
++    op.drop_table('user_profiles')
++    op.drop_table('user_sessions')
++
++
++def downgrade():
++    # Tables cannot be restored once dropped.
++    # Data will be permanently lost.
++    raise NotImplementedError(
++        "Cannot reverse this migration. "
++        "The users, user_profiles, and user_sessions tables "
++        "have been permanently deleted."
++    )

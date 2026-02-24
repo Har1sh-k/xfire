@@ -1,0 +1,9 @@
+{
+  "expected_findings": [
+    {
+      "category": "SENSITIVE_DATA_LOGGING",
+      "severity": "High",
+      "description": "Authentication tokens and API keys are logged in plaintext via logger.info, risking credential exposure through log aggregation systems, log files, or stdout capture."
+    }
+  ]
+}

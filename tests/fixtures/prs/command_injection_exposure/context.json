@@ -1,0 +1,7 @@
+{
+  "repo_purpose": "Web dashboard",
+  "pr_title": "Add deploy endpoint",
+  "pr_description": "Adds a new endpoint to trigger deployment commands from the dashboard UI.",
+  "files_changed": ["app/api/deploy.py"],
+  "author": "dev-bob"
+}

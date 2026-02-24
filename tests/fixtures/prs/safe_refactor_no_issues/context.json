@@ -1,0 +1,7 @@
+{
+  "repo_purpose": "Utility library",
+  "pr_title": "Refactor string utilities",
+  "pr_description": "Rename functions for clarity, add type hints, and extract whitespace normalization into a helper function.",
+  "files_changed": ["utils/strings.py"],
+  "author": "dev-grace"
+}

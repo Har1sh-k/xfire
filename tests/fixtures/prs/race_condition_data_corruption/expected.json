@@ -1,0 +1,9 @@
+{
+  "expected_findings": [
+    {
+      "category": "RACE_CONDITION",
+      "severity": "Medium",
+      "description": "TOCTOU race conditions in store_file and delete_if_empty: file state is checked with exists()/stat() then acted upon with write_bytes()/unlink() without any file locking, allowing concurrent threads to corrupt or delete data between the check and the operation."
+    }
+  ]
+}

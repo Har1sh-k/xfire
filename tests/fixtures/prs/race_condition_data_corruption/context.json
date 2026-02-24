@@ -1,0 +1,7 @@
+{
+  "repo_purpose": "File processing service",
+  "pr_title": "Add concurrent file handler",
+  "pr_description": "Adds a file storage handler with deduplication support for the upload pipeline.",
+  "files_changed": ["services/file_handler.py"],
+  "author": "dev-frank"
+}

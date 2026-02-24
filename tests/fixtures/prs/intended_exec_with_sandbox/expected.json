@@ -1,0 +1,4 @@
+{
+  "expected_findings": [],
+  "notes": "Intended capability with sandbox - should not flag. The code executes user-supplied Python but does so inside a Docker container with network disabled, memory limits, read-only filesystem, and a timeout. This is an expected and properly sandboxed feature of an AI coding agent."
+}

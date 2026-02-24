@@ -1,0 +1,9 @@
+{
+  "expected_findings": [
+    {
+      "category": "COMMAND_INJECTION",
+      "severity": "Critical",
+      "description": "User-supplied input from request.json['cmd'] is passed directly to subprocess.run with shell=True, allowing arbitrary command execution on the server."
+    }
+  ]
+}

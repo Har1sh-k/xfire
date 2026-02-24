@@ -1,0 +1,4 @@
+{
+  "expected_findings": [],
+  "notes": "Safe refactor - zero findings expected. Changes are limited to renaming functions for clarity (process -> slugify, check -> is_valid_label), adding type hints, and extracting a private helper function. No security-relevant behavior is introduced or removed."
+}

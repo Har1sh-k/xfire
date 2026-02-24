@@ -1,0 +1,9 @@
+{
+  "expected_findings": [
+    {
+      "category": "DESTRUCTIVE_OP_NO_SAFEGUARD",
+      "severity": "High",
+      "description": "Migration drops three tables (users, user_profiles, user_sessions) with no backup step, no data export, and a downgrade function that raises NotImplementedError making the operation irreversible."
+    }
+  ]
+}

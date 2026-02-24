@@ -1,0 +1,31 @@
+diff --git a/app/api/deploy.py b/app/api/deploy.py
+new file mode 100644
+index 0000000..c4d83f2
+--- /dev/null
++++ b/app/api/deploy.py
+@@ -0,0 +1,25 @@
++import subprocess
++from flask import Blueprint, request, jsonify
++from app.auth import login_required
++
++deploy_bp = Blueprint('deploy', __name__)
++
++
++@deploy_bp.route('/api/run', methods=['POST'])
++@login_required
++def run_command():
++    """Execute a deployment command on the server."""
++    payload = request.json
++    if not payload or 'cmd' not in payload:
++        return jsonify({"error": "Missing 'cmd' field"}), 400
++
++    cmd = payload['cmd']
++    try:
++        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30)
++        return jsonify({
++            "stdout": result.stdout,
++            "stderr": result.stderr,
++            "returncode": result.returncode
++        })
++    except subprocess.TimeoutExpired:
++        return jsonify({"error": "Command timed out"}), 504

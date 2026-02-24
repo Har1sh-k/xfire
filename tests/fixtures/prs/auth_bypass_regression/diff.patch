@@ -1,0 +1,27 @@
+diff --git a/app/views/user.py b/app/views/user.py
+index 3a1f2c9..b7e4d8a 100644
+--- a/app/views/user.py
++++ b/app/views/user.py
+@@ -1,7 +1,6 @@
+ from flask import Blueprint, jsonify, request
+ from app.models import User
+-from app.auth import login_required
+ from app.schemas import UserSchema
+
+ user_bp = Blueprint('users', __name__)
+@@ -12,7 +11,6 @@ def list_users():
+     return jsonify(UserSchema(many=True).dump(users))
+
+
+-@login_required
+ @user_bp.route('/api/users/<int:user_id>', methods=['GET'])
+ def get_user(user_id):
+     """Return user profile details including email and settings."""
+@@ -21,7 +19,6 @@ def get_user(user_id):
+     return jsonify(UserSchema().dump(user))
+
+
+-@login_required
+ @user_bp.route('/api/users/<int:user_id>', methods=['PUT'])
+ def update_user(user_id):
+     """Update user profile."""

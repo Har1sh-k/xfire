@@ -1,0 +1,37 @@
+diff --git a/services/file_handler.py b/services/file_handler.py
+new file mode 100644
+index 0000000..e5c2a17
+--- /dev/null
++++ b/services/file_handler.py
+@@ -0,0 +1,28 @@
++import os
++import shutil
++from pathlib import Path
++
++
++class ConcurrentFileHandler:
++    """Handle file uploads with deduplication."""
++
++    def __init__(self, storage_dir: str):
++        self.storage_dir = Path(storage_dir)
++
++    def store_file(self, filename: str, data: bytes) -> str:
++        dest = self.storage_dir / filename
++
++        # Check if file already exists
++        if dest.exists():
++            existing_size = dest.stat().st_size
++            if existing_size == len(data):
++                return str(dest)  # Skip duplicate
++
++        # Another thread may create/modify the file between the check above
++        # and the write below (TOCTOU race condition)
++        dest.write_bytes(data)
++        return str(dest)
++
++    def delete_if_empty(self, filename: str) -> bool:
++        path = self.storage_dir / filename
++        if path.exists() and path.stat().st_size == 0:
++            path.unlink()  # File could have been written to between check and delete
++            return True
++        return False

@@ -1,0 +1,9 @@
+{
+  "expected_findings": [
+    {
+      "category": "AUTH_BYPASS",
+      "severity": "Critical",
+      "description": "The @login_required decorator was removed from get_user and update_user endpoints, exposing authenticated user data and mutation operations to unauthenticated callers."
+    }
+  ]
+}
