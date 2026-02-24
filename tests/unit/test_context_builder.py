@@ -1,6 +1,20 @@
 """Tests for the context builder."""
 
-from crossfire.core.context_builder import detect_language, parse_diff
+import os
+import subprocess
+
+from crossfire.config.settings import AnalysisConfig
+from crossfire.core.context_builder import (
+    ContextBuilder,
+    _find_imports_js,
+    _find_imports_python,
+    _find_test_files,
+    _get_directory_structure,
+    _read_file_safe,
+    _run_git,
+    detect_language,
+    parse_diff,
+)
 
 
 class TestDetectLanguage:
@@ -164,3 +178,131 @@ index abc1234..def5678 100644
         assert len(files[0].diff_hunks) == 2
         assert files[0].diff_hunks[0].new_start == 1
         assert files[0].diff_hunks[1].new_start == 21
+
+
+# ─── _run_git Tests ──────────────────────────────────────────────────────────
+
+
+class TestRunGit:
+    def test_successful_command(self, tmp_path):
+        # Init a git repo
+        subprocess.run(["git", "init"], cwd=str(tmp_path), capture_output=True)
+        subprocess.run(
+            ["git", "config", "user.email", "test@test.com"],
+            cwd=str(tmp_path), capture_output=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "Test"],
+            cwd=str(tmp_path), capture_output=True,
+        )
+        result = _run_git(["status"], str(tmp_path))
+        assert result is not None
+        assert "branch" in result.lower() or "no commits" in result.lower()
+
+    def test_invalid_command_returns_none(self, tmp_path):
+        result = _run_git(["not-a-real-command"], str(tmp_path))
+        assert result is None
+
+
+# ─── _read_file_safe Tests ───────────────────────────────────────────────────
+
+
+class TestReadFileSafe:
+    def test_reads_small_file(self, tmp_path):
+        f = tmp_path / "test.txt"
+        f.write_text("hello world")
+        assert _read_file_safe(str(f)) == "hello world"
+
+    def test_returns_none_for_missing_file(self, tmp_path):
+        assert _read_file_safe(str(tmp_path / "nope.txt")) is None
+
+    def test_returns_none_for_large_file(self, tmp_path):
+        f = tmp_path / "big.txt"
+        f.write_text("x" * 100)
+        assert _read_file_safe(str(f), max_size=50) is None
+
+
+# ─── Import Detection Tests ─────────────────────────────────────────────────
+
+
+class TestFindImportsPython:
+    def test_finds_local_module(self, tmp_path):
+        (tmp_path / "utils.py").write_text("def helper(): pass\n")
+        content = "from utils import helper\nimport os\n"
+        related = _find_imports_python(content, "app.py", str(tmp_path))
+        paths = [r.path for r in related]
+        assert "utils.py" in paths
+
+    def test_ignores_stdlib(self, tmp_path):
+        content = "import os\nimport sys\n"
+        related = _find_imports_python(content, "app.py", str(tmp_path))
+        assert len(related) == 0
+
+
+class TestFindImportsJs:
+    def test_finds_relative_import(self, tmp_path):
+        (tmp_path / "utils.js").write_text("export function foo() {}\n")
+        content = "import { foo } from './utils';\n"
+        related = _find_imports_js(content, "index.js", str(tmp_path))
+        paths = [r.path for r in related]
+        assert any("utils" in p for p in paths)
+
+
+# ─── Directory Structure & Test Files Tests ──────────────────────────────────
+
+
+class TestGetDirectoryStructure:
+    def test_basic_structure(self, tmp_path):
+        (tmp_path / "src").mkdir()
+        (tmp_path / "src" / "main.py").write_text("pass")
+        tree = _get_directory_structure(str(tmp_path))
+        assert "src" in tree
+        assert "main.py" in tree
+
+
+class TestFindTestFiles:
+    def test_finds_matching_test(self, tmp_path):
+        tests_dir = tmp_path / "tests"
+        tests_dir.mkdir()
+        (tests_dir / "test_app.py").write_text("pass")
+        result = _find_test_files("app.py", str(tmp_path))
+        assert any("test_app.py" in r for r in result)
+
+
+# ─── ContextBuilder.build_from_diff Tests ────────────────────────────────────
+
+
+class TestContextBuilderBuildFromDiff:
+    def test_build_from_diff_in_git_repo(self, tmp_path):
+        """Build context from a diff string in a tmp git repo."""
+        # Init a minimal git repo
+        subprocess.run(["git", "init"], cwd=str(tmp_path), capture_output=True)
+        subprocess.run(
+            ["git", "config", "user.email", "t@t.com"],
+            cwd=str(tmp_path), capture_output=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "T"],
+            cwd=str(tmp_path), capture_output=True,
+        )
+        (tmp_path / "app.py").write_text("def hello(): pass\n")
+        subprocess.run(["git", "add", "."], cwd=str(tmp_path), capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", "init"],
+            cwd=str(tmp_path), capture_output=True,
+        )
+
+        diff_text = """\
+diff --git a/app.py b/app.py
+index abc..def 100644
+--- a/app.py
++++ b/app.py
+@@ -1,1 +1,2 @@
+ def hello(): pass
++def world(): pass
+"""
+        builder = ContextBuilder(AnalysisConfig(context_depth="shallow"))
+        ctx = builder.build_from_diff(diff_text, str(tmp_path))
+        assert ctx.repo_name  # should be detected
+        assert len(ctx.files) == 1
+        assert ctx.files[0].path == "app.py"
