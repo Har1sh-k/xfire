@@ -252,7 +252,7 @@ class DebateEngine:
             )
 
         # Step 4: Judge
-        judge_argument = await self._run_judge(
+        judge_argument, judge_raw_response = await self._run_judge(
             agents.get(judge_name),
             judge_name,
             finding_summary,
@@ -266,14 +266,16 @@ class DebateEngine:
         if not prosecutor_argument or not defense_argument or not judge_argument:
             return None
 
-        # Parse severity from judge if available
+        # Parse severity from judge's raw response (not the extracted argument text)
         final_severity = finding.severity
-        try:
-            parsed_judge = agents[judge_name].parse_json_response(judge_argument.argument) if judge_name in agents else {}
-            sev_str = parsed_judge.get("final_severity", finding.severity.value) if isinstance(parsed_judge, dict) else finding.severity.value
-            final_severity = Severity(sev_str)
-        except (ValueError, AgentError):
-            pass
+        if judge_raw_response and judge_name in agents:
+            try:
+                parsed_judge = agents[judge_name].parse_json_response(judge_raw_response)
+                if isinstance(parsed_judge, dict):
+                    sev_str = parsed_judge.get("final_severity", finding.severity.value)
+                    final_severity = Severity(sev_str)
+            except (ValueError, AgentError):
+                pass
 
         debate = DebateRecord(
             finding_id=finding.id,
@@ -399,13 +401,17 @@ class DebateEngine:
         defense_argument: str,
         rebuttal_argument: str | None,
         intent_summary: str,
-    ) -> AgentArgument | None:
-        """Run the judge phase."""
+    ) -> tuple[AgentArgument | None, str]:
+        """Run the judge phase.
+
+        Returns (argument, raw_response) so the caller can parse
+        structured fields like final_severity from the original JSON.
+        """
         if not agent:
             return AgentArgument(
                 agent_name=agent_name, role="judge",
                 position="unclear", argument="Agent unavailable", confidence=0.0,
-            )
+            ), ""
 
         prompt = build_judge_prompt(
             finding_summary, prosecutor_argument, defense_argument,
@@ -414,10 +420,10 @@ class DebateEngine:
 
         try:
             response = await agent.execute(prompt, JUDGE_SYSTEM_PROMPT)
-            return _parse_agent_argument(response, agent, "judge")
+            return _parse_agent_argument(response, agent, "judge"), response
         except AgentError as e:
             logger.error("debate.judge_failed", error=str(e))
-            return None
+            return None, ""
 
     def _apply_debate_result(self, finding: Finding, debate: DebateRecord) -> None:
         """Update finding based on debate outcome."""
