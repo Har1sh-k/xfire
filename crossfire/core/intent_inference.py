@@ -9,14 +9,9 @@ structure patterns, dependency analysis, and security control scanning.
 from __future__ import annotations
 
 import re
-from typing import Any
-
-import structlog
 
 from crossfire.config.settings import RepoConfig
 from crossfire.core.models import IntentProfile, PRContext, SecurityControl, TrustBoundary
-
-logger = structlog.get_logger()
 
 
 # ---------------------------------------------------------------------------

@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import os
-import tempfile
 
 import structlog
 
 from crossfire.agents.base import AgentError, BaseAgent
-from crossfire.config.settings import AgentConfig
 
 logger = structlog.get_logger()
 
@@ -29,27 +27,15 @@ class ClaudeAgent(BaseAgent):
         Command: claude -p "{prompt}" --system-prompt "{system_prompt}" --output-format json
         """
         cmd = [self.config.cli_command]
+        cmd.extend(["-p", prompt, "--output-format", "json"])
 
-        # Write prompt to temp file to avoid shell escaping issues
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
-            f.write(prompt)
-            prompt_file = f.name
+        if system_prompt:
+            cmd.extend(["--system-prompt", system_prompt])
 
-        try:
-            cmd.extend(["-p", prompt, "--output-format", "json"])
+        # Add any extra CLI args from config
+        cmd.extend(self.config.cli_args)
 
-            if system_prompt:
-                cmd.extend(["--system-prompt", system_prompt])
-
-            # Add any extra CLI args from config
-            cmd.extend(self.config.cli_args)
-
-            return await self._run_subprocess(cmd)
-        finally:
-            try:
-                os.unlink(prompt_file)
-            except OSError:
-                pass
+        return await self._run_subprocess(cmd)
 
     async def _run_api(
         self,

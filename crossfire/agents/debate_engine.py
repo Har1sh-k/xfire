@@ -2,10 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
-import itertools
-from typing import Any
-
 import structlog
 
 from crossfire.agents.base import AgentError, BaseAgent

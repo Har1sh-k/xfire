@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import os
-import tempfile
 
 import structlog
 
 from crossfire.agents.base import AgentError, BaseAgent
-from crossfire.config.settings import AgentConfig
 
 logger = structlog.get_logger()
 

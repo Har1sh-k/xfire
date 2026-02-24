@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-import subprocess
 from abc import ABC, abstractmethod
 from typing import Any
 

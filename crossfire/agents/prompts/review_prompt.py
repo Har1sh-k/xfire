@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from crossfire.core.models import FileContext, IntentProfile, PRContext
+from crossfire.core.models import IntentProfile, PRContext
 
 REVIEW_SYSTEM_PROMPT = """You are an elite security engineer performing a thorough code review of a pull request.
 

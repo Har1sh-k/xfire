@@ -8,7 +8,6 @@ from crossfire.core.models import (
     AgentArgument,
     ConsensusOutcome,
     DebateRecord,
-    Finding,
     IntentProfile,
     Severity,
 )

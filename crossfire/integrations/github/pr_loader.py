@@ -5,7 +5,7 @@ from __future__ import annotations
 import structlog
 
 from crossfire.config.settings import AnalysisConfig
-from crossfire.core.models import DiffHunk, FileContext, PRContext
+from crossfire.core.models import PRContext
 
 logger = structlog.get_logger()
 

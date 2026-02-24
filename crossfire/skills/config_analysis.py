@@ -6,7 +6,7 @@ import os
 import re
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from crossfire.skills.base import BaseSkill, SkillResult
 
