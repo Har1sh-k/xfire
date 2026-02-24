@@ -1,4 +1,4 @@
-"""Tests for the debate engine — role assignment and formatting."""
+"""Tests for the debate engine — role assignment, formatting, routing, and budget."""
 
 import pytest
 
@@ -12,11 +12,21 @@ from crossfire.agents.debate_engine import (
     _parse_agent_argument,
 )
 from crossfire.config.settings import AgentConfig, CrossFireSettings, DebateConfig
+from crossfire.core.finding_synthesizer import (
+    FindingSynthesizer,
+    compute_debate_budget,
+    merge_severity,
+)
 from crossfire.core.models import (
+    AgentArgument,
+    AgentReview,
+    DebateTag,
     Evidence,
     Finding,
     FindingCategory,
+    FindingStatus,
     IntentProfile,
+    LineRange,
     PRContext,
     SecurityControl,
     Severity,
@@ -39,6 +49,7 @@ def _make_finding(**kwargs) -> Finding:
 def _make_settings(
     agents: dict | None = None,
     role_assignment: str = "rotate",
+    **debate_kwargs,
 ) -> CrossFireSettings:
     if agents is None:
         agents = {
@@ -48,8 +59,15 @@ def _make_settings(
         }
     return CrossFireSettings(
         agents=agents,
-        debate=DebateConfig(role_assignment=role_assignment),
+        debate=DebateConfig(role_assignment=role_assignment, **debate_kwargs),
     )
+
+
+def _make_review(agent: str, findings: list[Finding]) -> AgentReview:
+    return AgentReview(agent_name=agent, findings=findings)
+
+
+# ─── Formatting Tests ────────────────────────────────────────────────────────
 
 
 class TestFormatFindingSummary:
@@ -147,6 +165,9 @@ class TestFormatContextSummary:
         assert "Fix auth bypass" in summary
 
 
+# ─── Legacy Role Assignment Tests ────────────────────────────────────────────
+
+
 class TestAssignRoles:
     def test_rotation_three_agents(self):
         settings = _make_settings()
@@ -210,3 +231,386 @@ class TestAssignRoles:
         assert p in ("claude", "codex")
         assert d in ("claude", "codex")
         assert j in ("claude", "codex")
+
+
+# ─── Evidence-Driven Role Assignment Tests ───────────────────────────────────
+
+
+class TestEvidenceDrivenRoles:
+    """Test the new evidence-driven role assignment where
+    prosecutor=finder, defense=misser, judge=remaining."""
+
+    def test_one_finder_two_missers(self):
+        """Claude found it, codex and gemini missed → claude prosecutes,
+        codex defends (highest pref), gemini judges."""
+        settings = _make_settings(role_assignment="evidence")
+        engine = DebateEngine(settings)
+        finding = _make_finding(reviewing_agents=["claude"])
+        p, d, j = engine._assign_roles(finding)
+        assert p == "claude"
+        assert d == "codex"  # defense_preference: codex > claude > gemini
+        assert j == "gemini"
+
+    def test_two_finders_one_misser(self):
+        """Claude and codex found it, gemini missed → gemini defends,
+        judge by preference from finders."""
+        settings = _make_settings(role_assignment="evidence")
+        engine = DebateEngine(settings)
+        finding = _make_finding(reviewing_agents=["claude", "codex"])
+        p, d, j = engine._assign_roles(finding)
+        assert p == "claude"  # first finder
+        assert d == "gemini"  # only misser
+        # Judge from remaining enabled agents not already assigned
+        assert j == "codex"
+
+    def test_defense_preference_order(self):
+        """When gemini found it, claude and codex missed →
+        codex defends (codex > claude in defense_preference)."""
+        settings = _make_settings(role_assignment="evidence")
+        engine = DebateEngine(settings)
+        finding = _make_finding(reviewing_agents=["gemini"])
+        p, d, j = engine._assign_roles(finding)
+        assert p == "gemini"
+        assert d == "codex"  # codex > claude in defense pref
+        assert j == "claude"
+
+    def test_custom_defense_preference(self):
+        """Custom defense preference should be respected."""
+        settings = _make_settings(
+            role_assignment="evidence",
+            defense_preference=["gemini", "codex", "claude"],
+        )
+        engine = DebateEngine(settings)
+        finding = _make_finding(reviewing_agents=["claude"])
+        p, d, j = engine._assign_roles(finding)
+        assert p == "claude"
+        assert d == "gemini"  # gemini > codex in custom pref
+        assert j == "codex"
+
+    def test_custom_judge_preference(self):
+        """Custom judge preference should be respected."""
+        settings = _make_settings(
+            role_assignment="evidence",
+            judge_preference=["claude", "codex", "gemini"],
+        )
+        engine = DebateEngine(settings)
+        finding = _make_finding(reviewing_agents=["claude", "codex"])
+        p, d, j = engine._assign_roles(finding)
+        assert p == "claude"
+        assert d == "gemini"  # only misser
+        # Judge from finders by judge_preference: claude > codex, but claude=prosecutor
+        assert j == "codex"
+
+    def test_two_agent_mode(self):
+        """With only 2 agents, no real judge available."""
+        agents = {
+            "claude": AgentConfig(enabled=True),
+            "codex": AgentConfig(enabled=True),
+        }
+        settings = _make_settings(agents=agents, role_assignment="evidence")
+        engine = DebateEngine(settings)
+        finding = _make_finding(reviewing_agents=["claude"])
+        p, d, j = engine._assign_roles(finding)
+        assert p == "claude"
+        assert d == "codex"
+        # Judge defaults to defense in 2-agent mode
+        assert j == "codex"
+
+    def test_falls_back_to_rotation_without_finding(self):
+        """Evidence mode without a finding falls back to rotation."""
+        settings = _make_settings(role_assignment="evidence")
+        engine = DebateEngine(settings)
+        p, d, j = engine._assign_roles()  # no finding
+        # Should use rotation fallback
+        assert len({p, d, j}) == 3
+
+
+# ─── Defense Concedes Detection Tests ────────────────────────────────────────
+
+
+class TestDefenseConcedes:
+    """Test detection of whether defense agrees with prosecution."""
+
+    def test_real_issue_concedes(self):
+        arg = AgentArgument(
+            agent_name="codex", role="defense",
+            position="real_issue", argument="I agree", confidence=0.8,
+        )
+        assert DebateEngine._defense_concedes(arg) is True
+
+    def test_confirmed_concedes(self):
+        arg = AgentArgument(
+            agent_name="codex", role="defense",
+            position="confirmed", argument="This is real", confidence=0.9,
+        )
+        assert DebateEngine._defense_concedes(arg) is True
+
+    def test_false_positive_does_not_concede(self):
+        arg = AgentArgument(
+            agent_name="codex", role="defense",
+            position="false_positive", argument="Not a real issue", confidence=0.7,
+        )
+        assert DebateEngine._defense_concedes(arg) is False
+
+    def test_mitigated_does_not_concede(self):
+        arg = AgentArgument(
+            agent_name="codex", role="defense",
+            position="mitigated", argument="Controls exist", confidence=0.6,
+        )
+        assert DebateEngine._defense_concedes(arg) is False
+
+    def test_case_insensitive(self):
+        arg = AgentArgument(
+            agent_name="codex", role="defense",
+            position="Real_Issue", argument="Yes", confidence=0.8,
+        )
+        assert DebateEngine._defense_concedes(arg) is True
+
+
+# ─── Debate Budget Tests ────────────────────────────────────────────────────
+
+
+class TestDebateBudget:
+    """Test budget computation based on PR size."""
+
+    def test_tiny_pr(self):
+        assert compute_debate_budget(5) == 2
+
+    def test_small_pr(self):
+        assert compute_debate_budget(20) == 2
+
+    def test_medium_pr(self):
+        assert compute_debate_budget(50) == 6
+
+    def test_large_pr(self):
+        assert compute_debate_budget(100) == 6
+
+    def test_very_large_pr(self):
+        assert compute_debate_budget(300) == 12
+
+    def test_huge_pr(self):
+        assert compute_debate_budget(1000) == 20
+
+    def test_boundary_20(self):
+        assert compute_debate_budget(20) == 2
+        assert compute_debate_budget(21) == 6
+
+    def test_boundary_100(self):
+        assert compute_debate_budget(100) == 6
+        assert compute_debate_budget(101) == 12
+
+
+# ─── Severity Merge Tests ────────────────────────────────────────────────────
+
+
+class TestSeverityMerge:
+    """Test deterministic severity merge rule."""
+
+    def test_critical_wins(self):
+        """If any agent rated Critical, result is Critical."""
+        result = merge_severity([Severity.CRITICAL, Severity.LOW, Severity.LOW])
+        assert result == Severity.CRITICAL
+
+    def test_median_without_critical(self):
+        """Without Critical, take median."""
+        result = merge_severity([Severity.HIGH, Severity.MEDIUM, Severity.LOW])
+        assert result == Severity.MEDIUM
+
+    def test_two_high_one_low(self):
+        result = merge_severity([Severity.HIGH, Severity.HIGH, Severity.LOW])
+        assert result == Severity.HIGH
+
+    def test_all_same(self):
+        result = merge_severity([Severity.MEDIUM, Severity.MEDIUM, Severity.MEDIUM])
+        assert result == Severity.MEDIUM
+
+    def test_two_agents(self):
+        result = merge_severity([Severity.HIGH, Severity.LOW])
+        assert result == Severity.HIGH  # median of 2 = index 1
+
+    def test_single_agent(self):
+        result = merge_severity([Severity.LOW])
+        assert result == Severity.LOW
+
+
+# ─── Silent Dissent Tests ────────────────────────────────────────────────────
+
+
+class TestSilentDissent:
+    """Test silent dissent detection in the synthesizer."""
+
+    def test_no_dissent_when_agent_did_not_analyze_area(self):
+        """Missing agent with no overlapping findings → no dissent."""
+        synth = FindingSynthesizer()
+        finding = _make_finding(
+            reviewing_agents=["claude", "codex"],
+            affected_files=["auth/login.py"],
+            line_ranges=[LineRange(file_path="auth/login.py", start_line=10, end_line=20)],
+        )
+        reviews = [
+            _make_review("claude", [finding]),
+            _make_review("codex", [_make_finding(
+                reviewing_agents=["codex"],
+                line_ranges=[LineRange(file_path="auth/login.py", start_line=10, end_line=20)],
+            )]),
+            _make_review("gemini", []),  # gemini ran but found nothing here
+        ]
+        has_dissent = synth._check_silent_dissent(finding, ["gemini"], reviews)
+        assert has_dissent is False
+
+    def test_dissent_when_agent_rejected_overlapping_finding(self):
+        """Missing agent rejected a finding in the same area → dissent."""
+        synth = FindingSynthesizer()
+        finding = _make_finding(
+            reviewing_agents=["claude"],
+            affected_files=["auth/login.py"],
+            line_ranges=[LineRange(file_path="auth/login.py", start_line=10, end_line=20)],
+        )
+        rejected_finding = _make_finding(
+            status=FindingStatus.REJECTED,
+            affected_files=["auth/login.py"],
+            line_ranges=[LineRange(file_path="auth/login.py", start_line=15, end_line=25)],
+        )
+        reviews = [
+            _make_review("claude", [finding]),
+            _make_review("gemini", [rejected_finding]),
+        ]
+        has_dissent = synth._check_silent_dissent(finding, ["gemini"], reviews)
+        assert has_dissent is True
+
+    def test_dissent_when_file_mentioned_in_risk_assessment(self):
+        """Missing agent mentions the file in risk assessment → dissent."""
+        synth = FindingSynthesizer()
+        finding = _make_finding(
+            reviewing_agents=["claude"],
+            affected_files=["auth/login.py"],
+        )
+        review = AgentReview(
+            agent_name="gemini",
+            findings=[],
+            overall_risk_assessment="Reviewed auth/login.py — no issues found",
+        )
+        reviews = [_make_review("claude", [finding]), review]
+        has_dissent = synth._check_silent_dissent(finding, ["gemini"], reviews)
+        assert has_dissent is True
+
+
+# ─── Routing Table Tests ─────────────────────────────────────────────────────
+
+
+class TestRoutingTable:
+    """Test the evidence-driven debate routing table."""
+
+    def test_all_three_agents_found_auto_confirmed(self):
+        """All 3 agents found the same issue → auto_confirmed."""
+        synth = FindingSynthesizer()
+        lr = [LineRange(file_path="app.py", start_line=10, end_line=15)]
+        reviews = [
+            _make_review("claude", [_make_finding(reviewing_agents=["claude"], line_ranges=lr)]),
+            _make_review("codex", [_make_finding(reviewing_agents=["codex"], line_ranges=lr)]),
+            _make_review("gemini", [_make_finding(reviewing_agents=["gemini"], line_ranges=lr)]),
+        ]
+        result = synth.synthesize(reviews, IntentProfile())
+        assert len(result) == 1
+        assert result[0].debate_tag == DebateTag.AUTO_CONFIRMED
+        assert result[0].status == FindingStatus.CONFIRMED
+
+    def test_two_of_three_no_dissent_auto_confirmed(self):
+        """2 of 3 agents found it, no silent dissent → auto_confirmed, LIKELY."""
+        synth = FindingSynthesizer()
+        lr = [LineRange(file_path="app.py", start_line=10, end_line=15)]
+        reviews = [
+            _make_review("claude", [_make_finding(reviewing_agents=["claude"], line_ranges=lr)]),
+            _make_review("codex", [_make_finding(reviewing_agents=["codex"], line_ranges=lr)]),
+            _make_review("gemini", []),  # gemini ran, found nothing, no dissent
+        ]
+        result = synth.synthesize(reviews, IntentProfile())
+        assert len(result) == 1
+        assert result[0].debate_tag == DebateTag.AUTO_CONFIRMED
+        assert result[0].status == FindingStatus.LIKELY
+
+    def test_two_of_three_with_dissent_needs_debate(self):
+        """2 of 3 found, missing agent explicitly rejected same area → needs_debate."""
+        synth = FindingSynthesizer()
+        lr = [LineRange(file_path="auth/login.py", start_line=10, end_line=15)]
+        rejected = _make_finding(
+            status=FindingStatus.REJECTED,
+            affected_files=["auth/login.py"],
+            reviewing_agents=[],
+            line_ranges=[LineRange(file_path="auth/login.py", start_line=12, end_line=18)],
+        )
+        reviews = [
+            _make_review("claude", [_make_finding(reviewing_agents=["claude"], line_ranges=lr)]),
+            _make_review("codex", [_make_finding(reviewing_agents=["codex"], line_ranges=lr)]),
+            _make_review("gemini", [rejected]),
+        ]
+        result = synth.synthesize(reviews, IntentProfile())
+        assert len(result) == 1
+        assert result[0].debate_tag == DebateTag.NEEDS_DEBATE
+
+    def test_one_of_three_needs_debate(self):
+        """1 of 3 found → needs_debate."""
+        synth = FindingSynthesizer()
+        reviews = [
+            _make_review("claude", [_make_finding(reviewing_agents=["claude"])]),
+            _make_review("codex", []),
+            _make_review("gemini", []),
+        ]
+        result = synth.synthesize(reviews, IntentProfile())
+        assert len(result) == 1
+        assert result[0].debate_tag == DebateTag.NEEDS_DEBATE
+
+    def test_one_agent_mode_informational(self):
+        """Only 1 agent ran → informational."""
+        synth = FindingSynthesizer()
+        reviews = [
+            _make_review("claude", [_make_finding(reviewing_agents=["claude"])]),
+        ]
+        result = synth.synthesize(reviews, IntentProfile())
+        assert len(result) == 1
+        assert result[0].debate_tag == DebateTag.INFORMATIONAL
+        assert result[0].status == FindingStatus.UNCLEAR
+
+    def test_two_agent_mode_both_found(self):
+        """2-agent mode, both found → auto_confirmed."""
+        synth = FindingSynthesizer()
+        lr = [LineRange(file_path="app.py", start_line=10, end_line=15)]
+        reviews = [
+            _make_review("claude", [_make_finding(reviewing_agents=["claude"], line_ranges=lr)]),
+            _make_review("codex", [_make_finding(reviewing_agents=["codex"], line_ranges=lr)]),
+        ]
+        result = synth.synthesize(reviews, IntentProfile())
+        assert len(result) == 1
+        assert result[0].debate_tag == DebateTag.AUTO_CONFIRMED
+
+    def test_two_agent_mode_one_found_needs_debate(self):
+        """2-agent mode, 1 found 1 missed → needs_debate."""
+        synth = FindingSynthesizer()
+        reviews = [
+            _make_review("claude", [_make_finding(reviewing_agents=["claude"])]),
+            _make_review("codex", []),
+        ]
+        result = synth.synthesize(reviews, IntentProfile())
+        assert len(result) == 1
+        assert result[0].debate_tag == DebateTag.NEEDS_DEBATE
+
+
+# ─── Pick By Preference Tests ────────────────────────────────────────────────
+
+
+class TestPickByPreference:
+    def test_picks_first_match(self):
+        result = DebateEngine._pick_by_preference(
+            ["codex", "claude", "gemini"], ["claude", "gemini"],
+        )
+        assert result == "claude"
+
+    def test_picks_first_candidate_when_no_pref_match(self):
+        result = DebateEngine._pick_by_preference(
+            ["codex"], ["claude", "gemini"],
+        )
+        assert result == "claude"
+
+    def test_returns_none_for_empty_candidates(self):
+        result = DebateEngine._pick_by_preference(["codex"], [])
+        assert result is None
