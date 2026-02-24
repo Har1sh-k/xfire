@@ -96,8 +96,8 @@ class CrossFireOrchestrator:
         else:
             context = self.context_builder.build_from_staged(repo_dir)
 
-        # Run the common pipeline
-        report = await self._run_pipeline(context, skip_debate)
+        # Run the common pipeline, passing repo_dir so skills inspect the correct directory
+        report = await self._run_pipeline(context, skip_debate, repo_dir=repo_dir)
         report.review_duration_seconds = time.monotonic() - start_time
 
         return report
@@ -106,6 +106,7 @@ class CrossFireOrchestrator:
         self,
         context: PRContext,
         skip_debate: bool = False,
+        repo_dir: str | None = None,
     ) -> CrossFireReport:
         """Run the common analysis pipeline on a PRContext."""
 
@@ -127,7 +128,7 @@ class CrossFireOrchestrator:
 
         # 3. Run skills (pre-compute for agent context)
         logger.info("pipeline.skills_running")
-        skill_outputs = self._run_skills(context, intent)
+        skill_outputs = self._run_skills(context, intent, repo_dir=repo_dir or ".")
         logger.info("pipeline.skills_complete", skills=list(skill_outputs.keys()))
 
         # 4. Independent agent reviews (parallel)
@@ -190,14 +191,12 @@ class CrossFireOrchestrator:
             agents_used=agents_used,
         )
 
-    def _run_skills(self, context: PRContext, intent: IntentProfile) -> dict[str, str]:
+    def _run_skills(
+        self, context: PRContext, intent: IntentProfile, repo_dir: str = ".",
+    ) -> dict[str, str]:
         """Run all enabled skills and return their outputs as strings."""
         outputs: dict[str, str] = {}
         changed_files = [f.path for f in context.files]
-
-        # We don't have a repo_dir for GitHub PRs, so skills that need it
-        # will work with limited capability. For local diffs, we pass repo_dir.
-        repo_dir = "."  # default for GitHub PRs
 
         if self.settings.skills.data_flow_tracing:
             try:
