@@ -207,11 +207,25 @@ class CrossFireOrchestrator:
         if not skip_debate:
             debate_findings = [f for f in findings if f.debate_tag == DebateTag.NEEDS_DEBATE]
             if debate_findings:
-                logger.info("pipeline.debate_starting", count=len(debate_findings))
+                # Compute debate budget based on PR size
+                from crossfire.core.finding_synthesizer import compute_debate_budget
+
+                changed_lines = sum(
+                    sum(len(h.added_lines) + len(h.removed_lines) for h in f.diff_hunks)
+                    for f in context.files
+                )
+                budget = compute_debate_budget(changed_lines)
+                logger.info(
+                    "pipeline.debate_starting",
+                    count=len(debate_findings),
+                    budget=budget,
+                    changed_lines=changed_lines,
+                )
                 debate_results = await self.debate_engine.debate_all(
                     findings=debate_findings,
                     context=context,
                     intent=intent,
+                    debate_budget=budget,
                 )
                 debates = [dr for _, dr in debate_results]
                 logger.info("pipeline.debate_complete", debates=len(debates))

@@ -127,19 +127,39 @@ class TestSynthesizer:
         # 0.7 * 1.4 = 0.98
         assert result[0].confidence > 0.9
 
-    def test_debate_tag_critical_always_needs_debate(self):
+    def test_debate_tag_single_agent_informational(self):
+        """1-agent mode always tags informational regardless of severity."""
         synth = FindingSynthesizer()
         f = _make_finding(severity=Severity.CRITICAL)
         reviews = [_make_review("claude", [f])]
         result = synth.synthesize(reviews, IntentProfile())
+        assert result[0].debate_tag == DebateTag.INFORMATIONAL
+
+    def test_debate_tag_one_of_two_needs_debate(self):
+        """1 agent found, 1 agent missed → needs debate."""
+        synth = FindingSynthesizer()
+        f = _make_finding(reviewing_agents=["claude"])
+        reviews = [
+            _make_review("claude", [f]),
+            _make_review("codex", []),  # codex ran but missed it
+        ]
+        result = synth.synthesize(reviews, IntentProfile())
         assert result[0].debate_tag == DebateTag.NEEDS_DEBATE
 
-    def test_debate_tag_low_single_agent_informational(self):
+    def test_debate_tag_all_agents_auto_confirmed(self):
+        """All agents found the same issue → auto-confirmed."""
         synth = FindingSynthesizer()
-        f = _make_finding(severity=Severity.LOW, reviewing_agents=["claude"])
-        reviews = [_make_review("claude", [f])]
+        f1 = _make_finding(
+            reviewing_agents=["claude"],
+            line_ranges=[LineRange(file_path="app.py", start_line=10, end_line=15)],
+        )
+        f2 = _make_finding(
+            reviewing_agents=["codex"],
+            line_ranges=[LineRange(file_path="app.py", start_line=10, end_line=15)],
+        )
+        reviews = [_make_review("claude", [f1]), _make_review("codex", [f2])]
         result = synth.synthesize(reviews, IntentProfile())
-        assert result[0].debate_tag == DebateTag.INFORMATIONAL
+        assert result[0].debate_tag == DebateTag.AUTO_CONFIRMED
 
     def test_intended_capability_with_controls_filtered_out(self):
         """Intended capabilities with isolation controls are dropped entirely."""

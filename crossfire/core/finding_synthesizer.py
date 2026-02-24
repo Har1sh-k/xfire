@@ -33,6 +33,30 @@ SEVERITY_ORDER = {
     Severity.LOW: 1,
 }
 
+# Debate budget caps by total changed lines in the PR
+_BUDGET_CAPS = [
+    (20, 2),
+    (100, 6),
+    (500, 12),
+]
+_BUDGET_CAP_DEFAULT = 20
+
+
+def compute_debate_budget(changed_lines: int) -> int:
+    """Return the max debate rounds for a PR based on changed lines."""
+    for threshold, cap in _BUDGET_CAPS:
+        if changed_lines <= threshold:
+            return cap
+    return _BUDGET_CAP_DEFAULT
+
+
+def merge_severity(severities: list[Severity]) -> Severity:
+    """Deterministic severity merge: Critical wins outright, else median."""
+    if Severity.CRITICAL in severities:
+        return Severity.CRITICAL
+    ordered = sorted(severities, key=lambda s: SEVERITY_ORDER[s])
+    return ordered[len(ordered) // 2]
+
 
 def _severity_max(a: Severity, b: Severity) -> Severity:
     """Return the higher severity."""
@@ -205,9 +229,10 @@ class FindingSynthesizer:
         for finding in merged_findings:
             self._apply_purpose_aware_adjustments(finding, intent)
 
-        # 6. Tag for debate routing
+        # 6. Tag for debate routing (evidence-driven)
+        all_agent_names = list(dict.fromkeys(r.agent_name for r in reviews))
         for finding in merged_findings:
-            self._tag_for_debate(finding)
+            self._tag_for_debate(finding, all_agent_names, reviews)
 
         # Sort by severity then confidence (highest first)
         merged_findings.sort(
@@ -277,31 +302,100 @@ class FindingSynthesizer:
                 finding.confidence = min(finding.confidence + 0.1, 0.99)
                 break
 
-    def _tag_for_debate(self, finding: Finding) -> None:
-        """Tag findings for debate routing.
+    def _tag_for_debate(
+        self,
+        finding: Finding,
+        all_agent_names: list[str],
+        reviews: list[AgentReview],
+    ) -> None:
+        """Tag findings for debate routing using evidence-driven logic.
 
-        - Catastrophic (Critical severity OR System blast radius) → needs_debate
-        - High → needs_debate
-        - Medium with low confidence → needs_debate
-        - Medium with high confidence + 2+ agents → auto_confirmed
-        - Low with 2+ agents → auto_confirmed
-        - Low with 1 agent → informational
+        Routing table (3-agent mode):
+        - All agents found, agree on severity → auto_confirmed
+        - All agents found, disagree severity → auto_confirmed (merge rule)
+        - 2 of 3 found, no silent dissent → auto_confirmed
+        - 2 of 3 found, with silent dissent → needs_debate
+        - 1 of 3 found → needs_debate
+
+        2-agent / 1-agent fallbacks handled similarly.
         """
-        agent_count = len(finding.reviewing_agents)
+        finders = finding.reviewing_agents
+        total_agents = len(all_agent_names)
+        finder_count = len(finders)
+        missers = [a for a in all_agent_names if a not in finders]
 
-        if finding.severity == Severity.CRITICAL or finding.blast_radius == BlastRadius.SYSTEM:
-            finding.debate_tag = DebateTag.NEEDS_DEBATE
-        elif finding.severity == Severity.HIGH:
-            finding.debate_tag = DebateTag.NEEDS_DEBATE
-        elif finding.severity == Severity.MEDIUM:
-            if finding.confidence >= 0.8 and agent_count >= 2:
-                finding.debate_tag = DebateTag.AUTO_CONFIRMED
-                finding.status = FindingStatus.LIKELY
-            else:
+        if total_agents == 0:
+            finding.debate_tag = DebateTag.INFORMATIONAL
+            return
+
+        # 1-agent mode (only 1 total agent ran) — insufficient corroboration
+        if total_agents == 1:
+            finding.debate_tag = DebateTag.INFORMATIONAL
+            finding.status = FindingStatus.UNCLEAR
+            return
+
+        # All agents found it → auto-confirm (severity via merge rule)
+        if finder_count >= total_agents:
+            finding.debate_tag = DebateTag.AUTO_CONFIRMED
+            finding.status = FindingStatus.CONFIRMED
+            return
+
+        # 2+ agents found it out of 3+
+        if finder_count >= 2:
+            # Check for silent dissent from the missing agent
+            has_dissent = self._check_silent_dissent(finding, missers, reviews)
+            if has_dissent:
                 finding.debate_tag = DebateTag.NEEDS_DEBATE
-        elif finding.severity == Severity.LOW:
-            if agent_count >= 2:
+            else:
                 finding.debate_tag = DebateTag.AUTO_CONFIRMED
                 finding.status = FindingStatus.LIKELY
-            else:
-                finding.debate_tag = DebateTag.INFORMATIONAL
+            return
+
+        # 1 found, 1+ missed → needs debate
+        finding.debate_tag = DebateTag.NEEDS_DEBATE
+
+    def _check_silent_dissent(
+        self,
+        finding: Finding,
+        missing_agents: list[str],
+        reviews: list[AgentReview],
+    ) -> bool:
+        """Check if any missing agent explicitly analyzed and dismissed this area.
+
+        Returns True if a missing agent's review contains a rejected finding
+        that overlaps on affected_files and line_ranges, indicating informed
+        dissent rather than ignorance.
+        """
+        finding_files = set(finding.affected_files)
+
+        for review in reviews:
+            if review.agent_name not in missing_agents:
+                continue
+
+            # Check for rejected findings that overlap
+            for rf in review.findings:
+                if rf.status != FindingStatus.REJECTED:
+                    continue
+                if set(rf.affected_files) & finding_files:
+                    if _lines_overlap(finding, rf):
+                        logger.info(
+                            "synthesizer.silent_dissent_detected",
+                            finding=finding.title,
+                            dissenting_agent=review.agent_name,
+                        )
+                        return True
+
+            # Check if the review's risk assessment mentions the same files
+            if review.overall_risk_assessment:
+                for fp in finding.affected_files:
+                    basename = fp.rsplit("/", 1)[-1]
+                    if basename in review.overall_risk_assessment:
+                        logger.info(
+                            "synthesizer.silent_dissent_detected",
+                            finding=finding.title,
+                            dissenting_agent=review.agent_name,
+                            reason="file mentioned in risk assessment",
+                        )
+                        return True
+
+        return False

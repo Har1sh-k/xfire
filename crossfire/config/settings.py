@@ -31,13 +31,19 @@ class AgentConfig(BaseModel):
 class DebateConfig(BaseModel):
     """Configuration for the debate system."""
 
-    role_assignment: str = "rotate"  # "rotate" | "fixed"
+    role_assignment: str = "evidence"  # "evidence" | "rotate" | "fixed"
     fixed_roles: dict[str, str] = Field(
         default_factory=lambda: {
             "prosecutor": "claude",
             "defense": "codex",
             "judge": "gemini",
         }
+    )
+    defense_preference: list[str] = Field(
+        default_factory=lambda: ["codex", "claude", "gemini"],
+    )
+    judge_preference: list[str] = Field(
+        default_factory=lambda: ["codex", "gemini", "claude"],
     )
     enable_rebuttal: bool = True
     require_evidence_citations: bool = True

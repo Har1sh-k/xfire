@@ -42,8 +42,6 @@ AGENT_CLASSES: dict[str, type[BaseAgent]] = {
     "gemini": GeminiAgent,
 }
 
-ROLE_CYCLE = ["claude", "codex", "gemini"]
-
 
 def _format_finding_summary(finding: Finding) -> str:
     """Format a finding into a readable summary for debate prompts."""
@@ -150,22 +148,45 @@ class DebateEngine:
         findings: list[Finding],
         context: PRContext,
         intent: IntentProfile,
+        debate_budget: int | None = None,
     ) -> list[tuple[Finding, DebateRecord]]:
-        """Run debates on all findings that need it.
+        """Run debates on all findings that need it, respecting budget.
+
+        Findings should arrive pre-sorted by (severity, confidence) descending
+        so the budget is spent on the most important findings first.
 
         Returns list of (finding, debate_record) tuples.
         """
+        from crossfire.core.finding_synthesizer import SEVERITY_ORDER
+
+        # Sort highest-severity first to spend budget wisely
+        sorted_findings = sorted(
+            findings,
+            key=lambda f: (SEVERITY_ORDER[f.severity], f.confidence),
+            reverse=True,
+        )
+
+        remaining_budget = debate_budget
         results: list[tuple[Finding, DebateRecord]] = []
 
-        for finding in findings:
+        for finding in sorted_findings:
+            # Budget check: each debate costs 1-2 rounds
+            if remaining_budget is not None and remaining_budget <= 0:
+                finding.status = FindingStatus.UNCLEAR
+                finding.debate_summary = "Skipped: debate budget exhausted"
+                logger.info("debate.budget_exhausted", finding=finding.title)
+                continue
+
             try:
                 debate = await self._debate_single(finding, context, intent)
                 if debate:
-                    # Update finding status based on consensus
                     self._apply_debate_result(finding, debate)
                     results.append((finding, debate))
+                    # Deduct from budget: 2 if rebuttal happened, else 1
+                    if remaining_budget is not None:
+                        cost = 2 if debate.rebuttal else 1
+                        remaining_budget -= cost
                 else:
-                    # Debate failed, mark as unclear
                     finding.status = FindingStatus.UNCLEAR
                     finding.debate_summary = "Debate could not be completed"
             except Exception as e:
@@ -181,8 +202,8 @@ class DebateEngine:
         intent: IntentProfile,
     ) -> DebateRecord | None:
         """Run a single debate for one finding."""
-        # Assign roles
-        prosecutor_name, defense_name, judge_name = self._assign_roles()
+        # Assign roles (evidence-driven: finder prosecutes, misser defends)
+        prosecutor_name, defense_name, judge_name = self._assign_roles(finding)
 
         logger.info(
             "debate.start",
@@ -298,15 +319,25 @@ class DebateEngine:
 
         return debate
 
-    def _assign_roles(self) -> tuple[str, str, str]:
-        """Assign roles based on config (rotate or fixed)."""
+    def _assign_roles(
+        self, finding: Finding | None = None,
+    ) -> tuple[str, str, str]:
+        """Assign debate roles based on config mode.
+
+        Modes:
+        - "evidence": prosecutor=finder, defense=highest-pref misser, judge=remaining
+        - "fixed": use fixed_roles from config
+        - "rotate": round-robin rotation (legacy fallback)
+        """
         enabled_agents = [name for name, cfg in self.settings.agents.items() if cfg.enabled]
         if not enabled_agents:
             raise AgentError("debate", "No agents are enabled for debate")
 
+        if self.settings.debate.role_assignment == "evidence" and finding:
+            return self._assign_evidence_roles(finding, enabled_agents)
+
         if self.settings.debate.role_assignment == "fixed":
             roles = self.settings.debate.fixed_roles
-            # Validate that fixed roles reference available agents; fall back to rotation
             if all(roles.get(r) in enabled_agents for r in ("prosecutor", "defense", "judge")):
                 return roles["prosecutor"], roles["defense"], roles["judge"]
             logger.warning(
@@ -316,7 +347,7 @@ class DebateEngine:
                 msg="Falling back to rotation",
             )
 
-        # Rotate roles
+        # Rotate roles (legacy fallback)
         agents = list(enabled_agents)
         while len(agents) < 3:
             agents.append(agents[0])
@@ -325,6 +356,63 @@ class DebateEngine:
         self._rotation_index += 1
 
         return agents[offset % len(agents)], agents[(offset + 1) % len(agents)], agents[(offset + 2) % len(agents)]
+
+    def _assign_evidence_roles(
+        self, finding: Finding, enabled_agents: list[str],
+    ) -> tuple[str, str, str]:
+        """Assign roles based on which agents found/missed the finding.
+
+        - Prosecutor: first finder (the agent that reported the vuln)
+        - Defense: highest-preference agent among those who missed it
+        - Judge: remaining agent, chosen by judge_preference
+        """
+        finders = [a for a in finding.reviewing_agents if a in enabled_agents]
+        missers = [a for a in enabled_agents if a not in finders]
+
+        # Pick prosecutor: first finder
+        prosecutor = finders[0] if finders else enabled_agents[0]
+
+        # Pick defense: highest-pref among missers
+        defense = self._pick_by_preference(
+            self.settings.debate.defense_preference, missers,
+        )
+        if not defense:
+            # No missers (all found) — fall back to defense_pref excluding prosecutor
+            candidates = [a for a in enabled_agents if a != prosecutor]
+            defense = self._pick_by_preference(
+                self.settings.debate.defense_preference, candidates,
+            )
+        if not defense:
+            defense = prosecutor  # single-agent edge case
+
+        # Pick judge: highest-pref among remaining
+        assigned = {prosecutor, defense}
+        remaining = [a for a in enabled_agents if a not in assigned]
+        judge = self._pick_by_preference(
+            self.settings.debate.judge_preference, remaining,
+        )
+        if not judge:
+            # 2-agent mode — no judge available
+            judge = defense
+
+        logger.info(
+            "debate.evidence_roles_assigned",
+            finders=finders,
+            missers=missers,
+            prosecutor=prosecutor,
+            defense=defense,
+            judge=judge,
+        )
+
+        return prosecutor, defense, judge
+
+    @staticmethod
+    def _pick_by_preference(preference: list[str], candidates: list[str]) -> str | None:
+        """Pick the first candidate that appears in the preference list."""
+        for pref in preference:
+            if pref in candidates:
+                return pref
+        return candidates[0] if candidates else None
 
     async def _run_prosecution(
         self,
