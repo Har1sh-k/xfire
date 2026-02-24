@@ -7,6 +7,7 @@ into a single end-to-end pipeline.
 
 from __future__ import annotations
 
+import asyncio
 import time
 
 import structlog
@@ -127,9 +128,18 @@ class CrossFireOrchestrator:
         )
 
         # 3. Run skills (pre-compute for agent context)
-        logger.info("pipeline.skills_running")
-        skill_outputs = self._run_skills(context, intent, repo_dir=repo_dir or ".")
-        logger.info("pipeline.skills_complete", skills=list(skill_outputs.keys()))
+        if repo_dir is not None:
+            logger.info("pipeline.skills_running")
+            skill_outputs = await asyncio.to_thread(
+                self._run_skills, context, intent, repo_dir,
+            )
+            logger.info("pipeline.skills_complete", skills=list(skill_outputs.keys()))
+        else:
+            logger.info(
+                "pipeline.skills_skipped",
+                msg="No local checkout — filesystem skills unavailable",
+            )
+            skill_outputs = {}
 
         # 4. Independent agent reviews (parallel)
         logger.info("pipeline.agent_reviews")
@@ -140,7 +150,14 @@ class CrossFireOrchestrator:
             total_findings=sum(len(r.findings) for r in reviews),
         )
 
-        if len(reviews) < 2:
+        enabled_count = sum(1 for c in self.settings.agents.values() if c.enabled)
+        if not reviews and enabled_count > 0:
+            logger.error(
+                "pipeline.all_agents_failed",
+                enabled=enabled_count,
+                msg="All agents failed — report may be incomplete",
+            )
+        elif len(reviews) < 2:
             logger.warning("pipeline.insufficient_reviews", count=len(reviews))
 
         # 5. Synthesize findings
@@ -286,6 +303,14 @@ class CrossFireOrchestrator:
     ) -> str:
         """Build a human-readable summary."""
         from crossfire.core.models import FindingStatus
+
+        enabled_count = sum(1 for c in self.settings.agents.values() if c.enabled)
+
+        if not reviews and enabled_count > 0:
+            return (
+                f"WARNING: All {enabled_count} agent(s) failed. "
+                "No findings were produced — this does NOT mean the code is safe."
+            )
 
         confirmed = [f for f in findings if f.status == FindingStatus.CONFIRMED]
         likely = [f for f in findings if f.status == FindingStatus.LIKELY]

@@ -72,12 +72,14 @@ def generate_markdown_report(report: CrossFireReport) -> str:
     parts.append("---")
     parts.append("")
 
+    total_agents = len(report.agents_used)
+
     # Confirmed findings
     if confirmed:
         parts.append("## 🚨 Confirmed Findings")
         parts.append("")
         for i, f in enumerate(confirmed, 1):
-            parts.append(_format_finding(f, i))
+            parts.append(_format_finding(f, i, total_agents))
             # Include debate log if available
             debate = _find_debate(f, report.debates)
             if debate:
@@ -89,7 +91,7 @@ def generate_markdown_report(report: CrossFireReport) -> str:
         parts.append("## ⚠️ Likely Findings")
         parts.append("")
         for i, f in enumerate(likely, 1):
-            parts.append(_format_finding(f, i))
+            parts.append(_format_finding(f, i, total_agents))
             parts.append("")
 
     # Unclear findings
@@ -97,7 +99,7 @@ def generate_markdown_report(report: CrossFireReport) -> str:
         parts.append("## 🔍 Needs Human Review")
         parts.append("")
         for i, f in enumerate(unclear, 1):
-            parts.append(_format_finding(f, i))
+            parts.append(_format_finding(f, i, total_agents))
             parts.append("")
 
     # Rejected findings (collapsed)
@@ -123,15 +125,15 @@ def generate_markdown_report(report: CrossFireReport) -> str:
     return "\n".join(parts)
 
 
-def _format_finding(finding: Finding, index: int) -> str:
+def _format_finding(finding: Finding, index: int, total_agents: int = 0) -> str:
     """Format a single finding for the markdown report."""
     parts: list[str] = []
 
-    emoji = SEVERITY_EMOJI.get(finding.severity, "")
     parts.append(f"### CF-{index:03d}: {finding.title}")
 
     agents_str = ", ".join(finding.reviewing_agents)
     agent_count = len(finding.reviewing_agents)
+    denominator = max(total_agents, agent_count)
     parts.append(
         f"**Severity:** {finding.severity.value} | "
         f"**Confidence:** {finding.confidence:.2f} | "
@@ -139,7 +141,7 @@ def _format_finding(finding: Finding, index: int) -> str:
     )
     parts.append(
         f"**Blast Radius:** {finding.blast_radius.value} | "
-        f"**Found by:** {agents_str} ({agent_count}/{agent_count} agent{'s' if agent_count > 1 else ''})"
+        f"**Found by:** {agents_str} ({agent_count}/{denominator} agent{'s' if denominator > 1 else ''})"
     )
     parts.append("")
 

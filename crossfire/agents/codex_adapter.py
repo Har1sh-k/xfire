@@ -43,7 +43,7 @@ class CodexAgent(BaseAgent):
         system_prompt: str,
         context_files: list[str] | None,
     ) -> str:
-        """Run via OpenAI API."""
+        """Run via OpenAI API (async)."""
         try:
             import openai
         except ImportError:
@@ -53,7 +53,7 @@ class CodexAgent(BaseAgent):
         if not api_key:
             raise AgentError(self.name, f"API key not found in env var {self.config.api_key_env}")
 
-        client = openai.OpenAI(api_key=api_key)
+        client = openai.AsyncOpenAI(api_key=api_key, timeout=self.config.timeout)
 
         logger.info("agent.api.start", agent=self.name, model=self.config.model)
 
@@ -63,7 +63,7 @@ class CodexAgent(BaseAgent):
                 messages.append({"role": "system", "content": system_prompt})
             messages.append({"role": "user", "content": prompt})
 
-            response = client.chat.completions.create(
+            response = await client.chat.completions.create(
                 model=self.config.model,
                 messages=messages,
             )

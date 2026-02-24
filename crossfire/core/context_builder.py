@@ -538,6 +538,10 @@ class ContextBuilder:
         """Build PRContext from staged changes in a git repo."""
         diff_text = _run_git(["diff", "--cached"], repo_dir) or ""
         if not diff_text.strip():
+            logger.warning(
+                "context.no_staged_changes",
+                msg="No staged changes found, falling back to unstaged diff",
+            )
             diff_text = _run_git(["diff"], repo_dir) or ""
 
         return self.build_from_diff(

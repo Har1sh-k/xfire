@@ -26,17 +26,25 @@ async def post_review_comment(
 
     async with httpx.AsyncClient(headers=headers, timeout=30.0) as client:
         # Check for existing CrossFire comments to update instead of creating new
-        comments_resp = await client.get(
-            f"https://api.github.com/repos/{repo}/issues/{pr_number}/comments",
-            params={"per_page": 100},
-        )
-
         existing_comment_id = None
-        if comments_resp.status_code == 200:
-            for comment in comments_resp.json():
+        page = 1
+        while True:
+            comments_resp = await client.get(
+                f"https://api.github.com/repos/{repo}/issues/{pr_number}/comments",
+                params={"per_page": 100, "page": page},
+            )
+            if comments_resp.status_code != 200:
+                break
+            comments = comments_resp.json()
+            if not comments:
+                break
+            for comment in comments:
                 if "CrossFire Security Review" in comment.get("body", ""):
                     existing_comment_id = comment["id"]
                     break
+            if existing_comment_id or len(comments) < 100:
+                break
+            page += 1
 
         if existing_comment_id:
             # Update existing comment

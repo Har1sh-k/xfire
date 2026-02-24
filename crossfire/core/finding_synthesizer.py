@@ -146,24 +146,32 @@ class FindingSynthesizer:
 
         logger.info("synthesizer.start", total_findings=len(all_findings))
 
-        # 2. Cluster similar findings
-        clusters: list[list[Finding]] = []
-        used: set[int] = set()
+        # 2. Cluster similar findings (union-find for transitive grouping)
+        n = len(all_findings)
+        parent = list(range(n))
 
-        for i, finding_a in enumerate(all_findings):
-            if i in used:
-                continue
-            cluster = [finding_a]
-            used.add(i)
+        def _find(x: int) -> int:
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
 
-            for j, finding_b in enumerate(all_findings):
-                if j in used:
-                    continue
-                if _is_similar_finding(finding_a, finding_b):
-                    cluster.append(finding_b)
-                    used.add(j)
+        def _union(a: int, b: int) -> None:
+            ra, rb = _find(a), _find(b)
+            if ra != rb:
+                parent[ra] = rb
 
-            clusters.append(cluster)
+        for i in range(n):
+            for j in range(i + 1, n):
+                if _is_similar_finding(all_findings[i], all_findings[j]):
+                    _union(i, j)
+
+        cluster_map: dict[int, list[Finding]] = {}
+        for i in range(n):
+            root = _find(i)
+            cluster_map.setdefault(root, []).append(all_findings[i])
+
+        clusters = list(cluster_map.values())
 
         # 3. Merge clusters
         merged_findings: list[Finding] = []

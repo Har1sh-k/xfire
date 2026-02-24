@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 
 import structlog
@@ -43,7 +44,7 @@ class GeminiAgent(BaseAgent):
         system_prompt: str,
         context_files: list[str] | None,
     ) -> str:
-        """Run via Google Generative AI API."""
+        """Run via Google Generative AI API (async)."""
         try:
             import google.generativeai as genai
         except ImportError:
@@ -62,7 +63,12 @@ class GeminiAgent(BaseAgent):
                 self.config.model,
                 system_instruction=system_prompt if system_prompt else None,
             )
-            response = model.generate_content(prompt)
+            response = await asyncio.wait_for(
+                model.generate_content_async(prompt),
+                timeout=self.config.timeout,
+            )
             return response.text
+        except asyncio.TimeoutError:
+            raise AgentError(self.name, f"API timed out after {self.config.timeout}s")
         except Exception as e:
             raise AgentError(self.name, f"API call failed: {e}")

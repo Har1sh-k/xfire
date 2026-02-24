@@ -126,6 +126,11 @@ class BaseAgent(ABC):
 
             return stdout.decode(errors="replace")
 
+        except FileNotFoundError:
+            raise AgentError(
+                self.name,
+                f"CLI command not found: {cmd[0]}. Is it installed and in PATH?",
+            )
         except asyncio.TimeoutError:
             logger.error("agent.subprocess.timeout", agent=self.name, timeout=timeout)
             raise AgentError(self.name, f"CLI timed out after {timeout}s")

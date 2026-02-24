@@ -2,12 +2,30 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import structlog
 
 from crossfire.config.settings import AnalysisConfig
 from crossfire.core.models import PRContext
 
 logger = structlog.get_logger()
+
+# Key manifest / config files to fetch from the repo for intent inference
+_MANIFEST_FILENAMES = [
+    "pyproject.toml",
+    "package.json",
+    "requirements.txt",
+    "go.mod",
+    "Gemfile",
+    "Cargo.toml",
+    "setup.py",
+    "setup.cfg",
+    "pom.xml",
+    "composer.json",
+]
+
+_CI_PATH_PREFIXES = (".github/workflows/", ".gitlab-ci", "Jenkinsfile")
 
 
 class GitHubAPIError(Exception):
@@ -35,6 +53,44 @@ def _handle_github_error(resp: object, context: str) -> None:
         raise GitHubAPIError(f"{context}: HTTP {status} — {resp.text[:200]}")
 
 
+def _build_directory_structure(file_paths: list[str]) -> str:
+    """Build a pseudo directory tree from a list of file paths."""
+    dirs: set[str] = set()
+    for path in file_paths:
+        parts = path.split("/")
+        for i in range(1, len(parts)):
+            dirs.add("/".join(parts[:i]) + "/")
+    # Sort for deterministic output
+    all_entries = sorted(dirs | set(file_paths))
+    return "\n".join(all_entries[:200])
+
+
+async def _fetch_all_pr_files(client: object, repo: str, pr_number: int) -> list[dict]:
+    """Fetch all PR files with pagination."""
+    import httpx
+
+    if not isinstance(client, httpx.AsyncClient):
+        return []
+
+    all_files: list[dict] = []
+    page = 1
+    while True:
+        resp = await client.get(
+            f"https://api.github.com/repos/{repo}/pulls/{pr_number}/files",
+            params={"per_page": 100, "page": page},
+        )
+        if not resp.is_success:
+            _handle_github_error(resp, f"Fetching files for {repo}#{pr_number}")
+        batch = resp.json()
+        if not batch:
+            break
+        all_files.extend(batch)
+        if len(batch) < 100:
+            break
+        page += 1
+    return all_files
+
+
 async def load_pr_context(
     repo: str,
     pr_number: int,
@@ -56,14 +112,8 @@ async def load_pr_context(
             _handle_github_error(pr_resp, f"Fetching PR {repo}#{pr_number}")
         pr_data = pr_resp.json()
 
-        # Fetch PR files (diff info)
-        files_resp = await client.get(
-            f"https://api.github.com/repos/{repo}/pulls/{pr_number}/files",
-            params={"per_page": 100},
-        )
-        if not files_resp.is_success:
-            _handle_github_error(files_resp, f"Fetching files for {repo}#{pr_number}")
-        files_data = files_resp.json()
+        # Fetch PR files with pagination
+        files_data = await _fetch_all_pr_files(client, repo, pr_number)
 
         # Fetch the diff
         diff_resp = await client.get(
@@ -78,49 +128,51 @@ async def load_pr_context(
         from crossfire.core.context_builder import parse_diff
         files = parse_diff(diff_text)
 
-        # Enrich with full file content from GitHub
+        # Enrich with full file content from GitHub (parallel)
         base_ref = pr_data.get("base", {}).get("sha", "")
         head_ref = pr_data.get("head", {}).get("sha", "")
+        raw_headers = {**headers, "Accept": "application/vnd.github.v3.raw"}
 
-        for fc in files:
+        async def _fetch_file_content(fc):
+            """Fetch head and base content for a single file."""
             if not fc.is_deleted:
-                # Fetch head version
-                content_resp = await client.get(
+                resp = await client.get(
                     f"https://api.github.com/repos/{repo}/contents/{fc.path}",
                     params={"ref": head_ref},
-                    headers={**headers, "Accept": "application/vnd.github.v3.raw"},
+                    headers=raw_headers,
                 )
-                if content_resp.status_code == 200:
-                    fc.content = content_resp.text
+                if resp.status_code == 200:
+                    fc.content = resp.text
 
             if not fc.is_new and config.context_depth != "shallow":
-                # Fetch base version (use old_path for renames since base lives at the old path)
                 base_fetch_path = fc.old_path if fc.is_renamed and fc.old_path else fc.path
-                base_resp = await client.get(
+                resp = await client.get(
                     f"https://api.github.com/repos/{repo}/contents/{base_fetch_path}",
                     params={"ref": base_ref},
-                    headers={**headers, "Accept": "application/vnd.github.v3.raw"},
+                    headers=raw_headers,
                 )
-                if base_resp.status_code == 200:
-                    fc.base_content = base_resp.text
+                if resp.status_code == 200:
+                    fc.base_content = resp.text
 
-        # Fetch README
-        readme_content = None
-        readme_resp = await client.get(
+        await asyncio.gather(*[_fetch_file_content(fc) for fc in files])
+
+        # Fetch README, repo info, and commits in parallel
+        readme_task = client.get(
             f"https://api.github.com/repos/{repo}/readme",
-            headers={**headers, "Accept": "application/vnd.github.v3.raw"},
+            headers=raw_headers,
         )
-        if readme_resp.status_code == 200:
-            readme_content = readme_resp.text
-
-        # Fetch repo info
-        repo_resp = await client.get(f"https://api.github.com/repos/{repo}")
-        repo_description = repo_resp.json().get("description", "") if repo_resp.status_code == 200 else ""
-
-        # Fetch commits on the PR
-        commits_resp = await client.get(
+        repo_task = client.get(f"https://api.github.com/repos/{repo}")
+        commits_task = client.get(
             f"https://api.github.com/repos/{repo}/pulls/{pr_number}/commits",
             params={"per_page": 50},
+        )
+        readme_resp, repo_resp, commits_resp = await asyncio.gather(
+            readme_task, repo_task, commits_task,
+        )
+
+        readme_content = readme_resp.text if readme_resp.status_code == 200 else None
+        repo_description = (
+            repo_resp.json().get("description", "") if repo_resp.status_code == 200 else ""
         )
         commit_messages = []
         if commits_resp.status_code == 200:
@@ -129,8 +181,39 @@ async def load_pr_context(
                 for c in commits_resp.json()
             ]
 
+        # Fetch key manifest files for intent inference (parallel)
+        config_files: dict[str, str] = {}
+
+        async def _fetch_manifest(filename: str):
+            resp = await client.get(
+                f"https://api.github.com/repos/{repo}/contents/{filename}",
+                params={"ref": head_ref},
+                headers=raw_headers,
+            )
+            if resp.status_code == 200:
+                config_files[filename] = resp.text
+
+        await asyncio.gather(*[_fetch_manifest(f) for f in _MANIFEST_FILENAMES])
+
+        # Also include any config files that are part of the PR changes
+        for fc in files:
+            if fc.content and fc.path not in config_files:
+                lower = fc.path.lower()
+                if any(lower.endswith(ext) for ext in (".yml", ".yaml", ".toml", ".cfg", ".ini", ".json")):
+                    config_files[fc.path] = fc.content
+
+        # Separate CI config files
+        ci_config_files: dict[str, str] = {}
+        for path, content in config_files.items():
+            if any(path.startswith(prefix) for prefix in _CI_PATH_PREFIXES):
+                ci_config_files[path] = content
+
+        # Build directory structure from file list
+        all_paths = [fd.get("filename", "") for fd in files_data if fd.get("filename")]
+        directory_structure = _build_directory_structure(all_paths)
+
         # Build context
-        labels = [l.get("name", "") for l in pr_data.get("labels", [])]
+        labels = [label.get("name", "") for label in pr_data.get("labels", [])]
 
         return PRContext(
             repo_name=repo,
@@ -145,4 +228,7 @@ async def load_pr_context(
             labels=labels,
             readme_content=readme_content,
             repo_description=repo_description,
+            config_files=config_files,
+            ci_config_files=ci_config_files,
+            directory_structure=directory_structure,
         )

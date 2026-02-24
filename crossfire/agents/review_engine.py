@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from enum import Enum
 
 import structlog
 
@@ -32,6 +33,21 @@ from crossfire.core.models import (
 
 logger = structlog.get_logger()
 
+
+def _parse_enum_flexible(enum_cls: type[Enum], value: str, default: Enum) -> Enum:
+    """Parse an enum value with case-insensitive fallback."""
+    try:
+        return enum_cls(value)
+    except ValueError:
+        pass
+    # Case-insensitive match against enum values
+    value_lower = str(value).lower().strip()
+    for member in enum_cls:
+        if member.value.lower() == value_lower:
+            return member
+    return default
+
+
 AGENT_CLASSES: dict[str, type[BaseAgent]] = {
     "claude": ClaudeAgent,
     "codex": CodexAgent,
@@ -50,30 +66,21 @@ def _create_agent(name: str, config: AgentConfig) -> BaseAgent:
 def _parse_finding_from_raw(raw: dict, agent_name: str) -> Finding | None:
     """Parse a raw finding dict from agent JSON into a Finding model."""
     try:
-        # Map category string to enum
-        category_str = raw.get("category", "MISSING_VALIDATION")
-        try:
-            category = FindingCategory(category_str)
-        except ValueError:
-            category = FindingCategory.MISSING_VALIDATION
-
-        severity_str = raw.get("severity", "Medium")
-        try:
-            severity = Severity(severity_str)
-        except ValueError:
-            severity = Severity.MEDIUM
-
-        exploitability_str = raw.get("exploitability", "Possible")
-        try:
-            exploitability = Exploitability(exploitability_str)
-        except ValueError:
-            exploitability = Exploitability.POSSIBLE
-
-        blast_radius_str = raw.get("blast_radius", "Component")
-        try:
-            blast_radius = BlastRadius(blast_radius_str)
-        except ValueError:
-            blast_radius = BlastRadius.COMPONENT
+        # Map category string to enum (case-insensitive)
+        category = _parse_enum_flexible(
+            FindingCategory,
+            raw.get("category", "MISSING_VALIDATION"),
+            FindingCategory.MISSING_VALIDATION,
+        )
+        severity = _parse_enum_flexible(
+            Severity, raw.get("severity", "Medium"), Severity.MEDIUM,
+        )
+        exploitability = _parse_enum_flexible(
+            Exploitability, raw.get("exploitability", "Possible"), Exploitability.POSSIBLE,
+        )
+        blast_radius = _parse_enum_flexible(
+            BlastRadius, raw.get("blast_radius", "Component"), BlastRadius.COMPONENT,
+        )
 
         # Parse evidence
         evidence_list: list[Evidence] = []
@@ -222,13 +229,20 @@ class ReviewEngine:
 
             duration = time.monotonic() - start_time
 
+            # Use dedicated files_analyzed key if present, else extract from findings
+            files_analyzed = parsed.get("files_analyzed")
+            if not files_analyzed:
+                files_analyzed = [
+                    f.get("file", "") for f in parsed.get("findings", [])
+                    if isinstance(f, dict) and "file" in f
+                ]
+
             return AgentReview(
                 agent_name=agent.name,
                 findings=findings,
                 overall_risk_assessment=parsed.get("overall_risk", "unknown"),
                 review_methodology=parsed.get("risk_summary", ""),
-                files_analyzed=[f.get("file", "") for f in parsed.get("findings", [])
-                                if isinstance(f, dict) and "file" in f],
+                files_analyzed=files_analyzed,
                 review_duration_seconds=duration,
             )
 

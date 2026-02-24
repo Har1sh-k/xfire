@@ -43,7 +43,7 @@ class ClaudeAgent(BaseAgent):
         system_prompt: str,
         context_files: list[str] | None,
     ) -> str:
-        """Run via Anthropic API."""
+        """Run via Anthropic API (async)."""
         try:
             import anthropic
         except ImportError:
@@ -53,12 +53,14 @@ class ClaudeAgent(BaseAgent):
         if not api_key:
             raise AgentError(self.name, f"API key not found in env var {self.config.api_key_env}")
 
-        client = anthropic.Anthropic(api_key=api_key)
+        client = anthropic.AsyncAnthropic(
+            api_key=api_key, timeout=self.config.timeout,
+        )
 
         logger.info("agent.api.start", agent=self.name, model=self.config.model)
 
         try:
-            response = client.messages.create(
+            response = await client.messages.create(
                 model=self.config.model,
                 system=system_prompt,
                 messages=[{"role": "user", "content": prompt}],
