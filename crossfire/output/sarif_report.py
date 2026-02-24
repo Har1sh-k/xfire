@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from typing import Any
 
@@ -13,6 +14,14 @@ SARIF_LEVEL_MAP = {
     Severity.HIGH: "error",
     Severity.MEDIUM: "warning",
     Severity.LOW: "note",
+}
+
+# SARIF rank (0.0–100.0) for result prioritization
+SARIF_RANK_MAP = {
+    Severity.CRITICAL: 95.0,
+    Severity.HIGH: 75.0,
+    Severity.MEDIUM: 50.0,
+    Severity.LOW: 25.0,
 }
 
 
@@ -38,6 +47,11 @@ def generate_sarif_report(report: CrossFireReport) -> str:
                         "toolExecutionNotifications": [],
                     }
                 ],
+                "properties": {
+                    "crossfire:overallRisk": report.overall_risk,
+                    "crossfire:agentsUsed": report.agents_used,
+                    "crossfire:summary": report.summary,
+                },
             }
         ],
     }
@@ -56,18 +70,35 @@ def _build_rules(findings: list[Finding]) -> list[dict[str, Any]]:
             continue
         seen_categories.add(cat)
 
-        rules.append({
+        readable_name = cat.replace("_", " ").title()
+
+        rule: dict[str, Any] = {
             "id": cat,
-            "name": cat.replace("_", " ").title(),
+            "name": readable_name,
             "shortDescription": {
-                "text": cat.replace("_", " ").title(),
+                "text": readable_name,
             },
             "defaultConfiguration": {
                 "level": SARIF_LEVEL_MAP.get(finding.severity, "warning"),
             },
-        })
+            "help": {
+                "text": f"CrossFire rule for {readable_name} findings.",
+            },
+        }
+        rules.append(rule)
 
     return rules
+
+
+def _partial_fingerprint(finding: Finding) -> dict[str, str]:
+    """Build a partial fingerprint for deduplication across runs."""
+    key_parts = [
+        finding.category.value,
+        finding.title,
+        ",".join(sorted(finding.affected_files)),
+    ]
+    digest = hashlib.sha256("|".join(key_parts).encode()).hexdigest()[:16]
+    return {"crossfire/v1": digest}
 
 
 def _build_results(findings: list[Finding]) -> list[dict[str, Any]]:
@@ -86,6 +117,8 @@ def _build_results(findings: list[Finding]) -> list[dict[str, Any]]:
                 "text": finding.title,
             },
             "locations": [],
+            "partialFingerprints": _partial_fingerprint(finding),
+            "rank": SARIF_RANK_MAP.get(finding.severity, 50.0),
             "properties": {
                 "confidence": finding.confidence,
                 "status": finding.status.value,
@@ -95,9 +128,13 @@ def _build_results(findings: list[Finding]) -> list[dict[str, Any]]:
             },
         }
 
+        # Add rationale to message if available
+        if finding.rationale_summary:
+            result["message"]["text"] = f"{finding.title}: {finding.rationale_summary}"
+
         # Add locations
         for lr in finding.line_ranges:
-            result["locations"].append({
+            location: dict[str, Any] = {
                 "physicalLocation": {
                     "artifactLocation": {
                         "uri": lr.file_path,
@@ -107,7 +144,15 @@ def _build_results(findings: list[Finding]) -> list[dict[str, Any]]:
                         "endLine": lr.end_line,
                     },
                 }
-            })
+            }
+            # Add code snippet if available from evidence
+            for ev in finding.evidence:
+                if ev.file_path == lr.file_path and ev.code_snippet:
+                    location["physicalLocation"]["region"]["snippet"] = {
+                        "text": ev.code_snippet,
+                    }
+                    break
+            result["locations"].append(location)
 
         # Fallback: use affected files if no line ranges
         if not result["locations"] and finding.affected_files:
@@ -119,6 +164,22 @@ def _build_results(findings: list[Finding]) -> list[dict[str, Any]]:
                         },
                     }
                 })
+
+        # Add related locations from evidence pointing to other files
+        related_locations: list[dict[str, Any]] = []
+        primary_files = {lr.file_path for lr in finding.line_ranges} | set(finding.affected_files)
+        seen_related: set[str] = set()
+        for ev in finding.evidence:
+            if ev.file_path and ev.file_path not in primary_files and ev.file_path not in seen_related:
+                seen_related.add(ev.file_path)
+                related_locations.append({
+                    "message": {"text": ev.description},
+                    "physicalLocation": {
+                        "artifactLocation": {"uri": ev.file_path},
+                    },
+                })
+        if related_locations:
+            result["relatedLocations"] = related_locations
 
         results.append(result)
 

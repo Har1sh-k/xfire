@@ -622,7 +622,8 @@ class ContextBuilder:
             fc.git_blame_summary = _get_git_blame_summary(fc.path, repo_dir)
 
             # Test files
-            fc.test_files = _find_test_files(fc.path, repo_dir)
+            if self.config.include_test_files:
+                fc.test_files = _find_test_files(fc.path, repo_dir)
 
         # Load related file contents (capped)
         loaded = 0
