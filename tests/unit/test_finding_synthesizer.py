@@ -1,6 +1,11 @@
 """Tests for finding synthesizer."""
 
-from crossfire.core.finding_synthesizer import FindingSynthesizer, _is_similar_finding
+from crossfire.core.finding_synthesizer import (
+    FindingSynthesizer,
+    _is_similar_finding,
+    compute_debate_budget,
+    merge_severity,
+)
 from crossfire.core.models import (
     AgentReview,
     BlastRadius,
@@ -200,3 +205,81 @@ class TestSynthesizer:
         reviews = [_make_review("claude", [f1]), _make_review("codex", [f2])]
         result = synth.synthesize(reviews, IntentProfile())
         assert len(result) == 2
+
+
+class TestMergeSeverity:
+    def test_empty_list_returns_medium(self):
+        assert merge_severity([]) == Severity.MEDIUM
+
+    def test_critical_wins(self):
+        assert merge_severity([Severity.LOW, Severity.CRITICAL, Severity.LOW]) == Severity.CRITICAL
+
+    def test_median_without_critical(self):
+        result = merge_severity([Severity.HIGH, Severity.MEDIUM, Severity.LOW])
+        assert result == Severity.MEDIUM
+
+
+class TestComputeDebateBudgetUnit:
+    def test_small_pr(self):
+        assert compute_debate_budget(10) == 2
+
+    def test_medium_pr(self):
+        assert compute_debate_budget(50) == 6
+
+    def test_large_pr(self):
+        assert compute_debate_budget(200) == 12
+
+    def test_huge_pr(self):
+        assert compute_debate_budget(1000) == 20
+
+
+class TestCheckSilentDissent:
+    def test_no_missing_agents(self):
+        synth = FindingSynthesizer()
+        finding = _make_finding(reviewing_agents=["claude"])
+        reviews = [_make_review("claude", [finding])]
+        assert synth._check_silent_dissent(finding, [], reviews) is False
+
+    def test_missing_agent_no_findings(self):
+        synth = FindingSynthesizer()
+        finding = _make_finding(
+            reviewing_agents=["claude"],
+            affected_files=["app.py"],
+        )
+        reviews = [
+            _make_review("claude", [finding]),
+            _make_review("codex", []),
+        ]
+        assert synth._check_silent_dissent(finding, ["codex"], reviews) is False
+
+    def test_missing_agent_with_overlapping_rejected(self):
+        synth = FindingSynthesizer()
+        finding = _make_finding(
+            reviewing_agents=["claude"],
+            affected_files=["app.py"],
+            line_ranges=[LineRange(file_path="app.py", start_line=10, end_line=20)],
+        )
+        rejected = _make_finding(
+            status=FindingStatus.REJECTED,
+            affected_files=["app.py"],
+            line_ranges=[LineRange(file_path="app.py", start_line=15, end_line=25)],
+        )
+        reviews = [
+            _make_review("claude", [finding]),
+            _make_review("codex", [rejected]),
+        ]
+        assert synth._check_silent_dissent(finding, ["codex"], reviews) is True
+
+
+class TestFilterNonExploitable:
+    def test_architectural_finding_filtered(self):
+        synth = FindingSynthesizer()
+        finding = _make_finding(category=FindingCategory.MISSING_RATE_LIMIT)
+        result = synth._filter_non_exploitable([finding], IntentProfile())
+        assert len(result) == 0
+
+    def test_non_architectural_finding_kept(self):
+        synth = FindingSynthesizer()
+        finding = _make_finding(category=FindingCategory.SQL_INJECTION)
+        result = synth._filter_non_exploitable([finding], IntentProfile())
+        assert len(result) == 1
