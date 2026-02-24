@@ -5,6 +5,7 @@ Priority: CLI flags > environment variables > .crossfire/config.yaml > defaults.
 
 from __future__ import annotations
 
+import copy
 import os
 from pathlib import Path
 from typing import Any
@@ -157,8 +158,8 @@ def load_settings(
     Returns:
         Fully resolved CrossFireSettings.
     """
-    # Start with defaults
-    merged = DEFAULT_CONFIG.copy()
+    # Start with defaults (deep copy to avoid mutating the shared DEFAULT_CONFIG)
+    merged = copy.deepcopy(DEFAULT_CONFIG)
 
     # Layer config file
     config_path = _find_config_file(repo_dir)
