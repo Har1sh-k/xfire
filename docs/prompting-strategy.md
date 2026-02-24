@@ -4,9 +4,9 @@
 
 The review prompt is the product. Most of CrossFire's value comes from how we prompt the agents. The prompts in `crossfire/agents/prompts/` are the most important code in the repo.
 
-## Review Prompt
+## Review Prompt (`review_prompt.py`)
 
-The independent review prompt (`review_prompt.py`) does several things:
+The independent review prompt does several things:
 
 1. **Sets the role**: "You are an elite security engineer" — not a scanner, not a tool
 2. **Defines methodology**: A 5-step review process mirroring how human reviewers work
@@ -17,27 +17,63 @@ The independent review prompt (`review_prompt.py`) does several things:
 
 ## Debate Prompts
 
-### Prosecutor
+The debate uses a 2-round judge-led structure. There are 4 prompt files for the 3 roles.
+
+### Round 1
+
+**Prosecutor** (`prosecutor_prompt.py` → `build_prosecutor_prompt()`):
 - Must cite specific code as evidence
 - Must explain concrete attack/failure path
-- Must address intent question
+- Must address the intent question (is this capability intended?)
 - Honest about weak evidence
 
-### Defense
+**Defense** (`defense_prompt.py` → `build_defense_prompt()`):
 - Must cite code showing controls/context
 - Must address prosecutor's claims point by point
 - Honest about real issues (don't defend the indefensible)
+- Signals whether it concedes or disagrees
 
-### Judge
-- Evaluates evidence quality from both sides
-- References specific arguments
-- Clear ruling with reasoning
+### Round 2 (triggered only if defense disagrees)
+
+**Judge Clarification** (`judge_prompt.py` → `build_judge_clarification_prompt()`):
+- Reviews Round 1 arguments
+- Asks targeted clarifying questions to both sides
+- Both prosecution and defense respond to the questions
+
+**Judge Final Ruling** (`judge_prompt.py` → `build_judge_final_prompt()`):
+- Evaluates all evidence from both rounds
+- References specific arguments and evidence citations
+- Issues a clear ruling with reasoning
 - Sets final severity and confidence
+
+### Skipping Round 2
+
+`build_judge_prompt()` handles the single-round path (defense concedes or `max_rounds: 1` in config). The judge issues a final ruling directly from Round 1 arguments.
+
+## Debate Flow
+
+```
+Round 1:
+  Prosecutor argues → Defense responds
+       |
+       v
+  Defense concedes? ──YES──> Judge rules directly (1 round)
+       |
+       NO
+       v
+Round 2:
+  Judge asks clarifying questions
+  Both sides respond
+       |
+       v
+  Judge issues final ruling (2 rounds)
+```
 
 ## Key Principles
 
 1. **Code citations required**: Abstract reasoning without code refs is weak
-2. **Purpose-awareness embedded**: Every prompt references intent profile
+2. **Purpose-awareness embedded**: Every prompt references the intent profile
 3. **Honesty incentivized**: Agents are told their credibility matters
 4. **Structured output**: JSON format ensures machine-parseable results
 5. **Balanced debate**: Both sides get equal context and opportunity
+6. **Evidence quality graded**: Judge explicitly assesses the quality of evidence, not just the argument
