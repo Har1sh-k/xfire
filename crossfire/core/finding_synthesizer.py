@@ -52,15 +52,12 @@ def compute_debate_budget(changed_lines: int) -> int:
 
 def merge_severity(severities: list[Severity]) -> Severity:
     """Deterministic severity merge: Critical wins outright, else median."""
+    if not severities:
+        return Severity.MEDIUM
     if Severity.CRITICAL in severities:
         return Severity.CRITICAL
     ordered = sorted(severities, key=lambda s: SEVERITY_ORDER[s])
     return ordered[len(ordered) // 2]
-
-
-def _severity_max(a: Severity, b: Severity) -> Severity:
-    """Return the higher severity."""
-    return a if SEVERITY_ORDER[a] >= SEVERITY_ORDER[b] else b
 
 
 def _files_overlap(files_a: list[str], files_b: list[str]) -> bool:
@@ -287,15 +284,6 @@ class FindingSynthesizer:
         self, finding: Finding, intent: IntentProfile
     ) -> None:
         """Apply purpose-aware adjustments to severity and confidence."""
-        pa = finding.purpose_aware_assessment
-
-        # If intended capability AND controls exist → reduce severity
-        if pa.is_intended_capability and pa.isolation_controls_present:
-            if finding.severity == Severity.CRITICAL:
-                finding.severity = Severity.MEDIUM
-            elif finding.severity == Severity.HIGH:
-                finding.severity = Severity.LOW
-
         # If in sensitive path → boost priority
         for path in finding.affected_files:
             if any(sp in path for sp in intent.sensitive_paths):
