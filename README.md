@@ -2,82 +2,328 @@
 
 > _"Multiple agents. One verdict. Zero blind spots."_
 
-CrossFire is an AI-powered PR security review system that reviews code the way senior security engineers do — by actually *reading and reasoning about it*, not by running regex scanners.
+CrossFire is an AI-powered PR security review tool that catches vulnerabilities the way a senior security engineer would — by reading and reasoning about code, not running regex scanners.
+
+It runs multiple AI agents independently, has them debate every finding, and only flags what survives adversarial cross-examination.
+
+---
 
 ## How It Works
 
-1. **Context Building** — Extracts deep context from PRs: diffs, full files, related files, git history, configs
-2. **Intent Inference** — Understands what the repo does and what capabilities are intended
-3. **Independent Agent Reviews** — Multiple AI agents independently review the code like security engineers
-4. **Adversarial Debate** — Agents debate findings (prosecutor vs defense vs judge) to eliminate false positives
-5. **Consensus Verdict** — Evidence-based consensus determines which findings are real
+```
+PR Input (GitHub API or local diff/patch)
+        |
+        v
+  Context Builder + Intent Inferrer
+  (diff, full files, git history, configs — what does this repo DO?)
+        |
+        v
+  Skills (pre-compute context signals)
+  (data flow, git blame, config risks, dependency changes, test gaps)
+        |
+        v
+  Independent Agent Reviews  [Claude | Codex | Gemini]
+  (each agent reads the code + skills context and identifies issues)
+        |
+        v
+  Finding Synthesizer
+  (cluster duplicates, cross-validation boost, purpose-aware adjustments)
+        |
+        v
+  Adversarial Debate (per finding)
+  Round 1: Prosecutor argues → Defense responds
+  Round 2: Judge asks clarifying questions (if defense disagrees)
+           Both sides respond → Judge issues final ruling
+        |
+        v
+  Policy Engine  →  Output (Markdown / JSON / SARIF)
+```
 
-## Key Differentiators
+### Why this works
 
-- **No SAST / No regex** — Agents READ and REASON about code, not pattern match
-- **Purpose-aware** — Understands intended capabilities vs actual vulnerabilities
-- **Multi-agent cross-validation** — Independent reviews catch what one agent misses
-- **Adversarial debate** — Eliminates false positives through evidence-based argumentation
-- **Deep context** — Agents see full files, related files, git history, and configs
+- **No SAST, no rules engine** — agents read and reason, they don't pattern-match
+- **Purpose-aware** — intent inference understands what the repo is supposed to do, so "intended capabilities" aren't flagged as bugs
+- **Independent reviews** — agents never see each other's output during review; blind spots from one are caught by another
+- **Adversarial debate** — every finding is stress-tested before it reaches you; false positives get eliminated, not passed through
+- **Skills provide grounding** — data flow traces, git blame, dependency diffs, and config analysis give agents concrete evidence to argue from
+
+---
+
+## Installation
+
+Requires Python 3.11+.
+
+```bash
+pip install crossfire
+```
+
+Or install from source:
+
+```bash
+git clone https://github.com/your-org/crossfire
+cd crossfire
+pip install -e ".[dev]"
+```
+
+---
 
 ## Quick Start
 
 ```bash
-pip install crossfire
-
 # Initialize config in your repo
 crossfire init
 
 # Analyze a GitHub PR
 crossfire analyze-pr --repo owner/repo --pr 123 --github-token $GITHUB_TOKEN
 
-# Analyze a local diff
+# Analyze a local patch file
 crossfire analyze-diff --patch changes.patch --repo-dir /path/to/repo
 
-# Analyze staged changes
+# Analyze staged changes before committing
 crossfire analyze-diff --staged --repo-dir .
+
+# Check your config is valid
+crossfire config-check
+
+# Run a demo with a built-in fixture
+crossfire demo --fixture auth_bypass_regression
 ```
+
+---
 
 ## Configuration
 
-Create `.crossfire/config.yaml` in your repo (or run `crossfire init`):
+Run `crossfire init` to generate `.crossfire/config.yaml` in your repo, or create it manually:
 
 ```yaml
+repo:
+  purpose: ""                          # override if intent inference gets it wrong
+  intended_capabilities: []            # capabilities that should NOT be flagged
+  sensitive_paths:
+    - "auth/"
+    - "payments/"
+    - "migrations/"
+
+analysis:
+  context_depth: deep                  # shallow | medium | deep
+  max_related_files: 20
+  include_test_files: true
+
 agents:
   claude:
     enabled: true
-    mode: cli          # cli | api
+    mode: cli                          # cli | api
+    cli_command: "claude"
+    cli_args: ["--output-format", "json"]
+    model: "claude-sonnet-4-20250514"
+    api_key_env: "ANTHROPIC_API_KEY"
+    timeout: 300
   codex:
     enabled: true
     mode: cli
+    cli_command: "codex"
+    model: "o3-mini"
+    api_key_env: "OPENAI_API_KEY"
+    timeout: 300
   gemini:
     enabled: true
     mode: cli
+    cli_command: "gemini"
+    model: "gemini-2.5-pro"
+    api_key_env: "GOOGLE_API_KEY"
+    timeout: 300
+
+  debate:
+    role_assignment: evidence          # evidence | rotate | fixed
+    max_rounds: 2
+    require_evidence_citations: true
+    min_agents_for_debate: 2
+
+  skills:
+    code_navigation: true
+    data_flow_tracing: true
+    git_archeology: true
+    config_analysis: true
+    dependency_analysis: true
+    test_coverage_check: true
 
 severity_gate:
-  fail_on: high
+  fail_on: high                        # minimum severity to fail CI
   min_confidence: 0.7
   require_debate: true
+
+suppressions: []
 ```
 
-See `.crossfire/config.example.yaml` for full configuration options.
+See `.crossfire/config.example.yaml` for the full reference with all options.
+
+---
+
+## Agents
+
+Each agent can run in two modes:
+
+| Mode | How it works | When to use |
+|------|-------------|-------------|
+| `cli` | Spawns the agent's CLI tool as a subprocess | Claude Code, Codex CLI, Gemini CLI installed locally |
+| `api` | Calls the provider's SDK directly | API keys available, no CLI tools installed |
+
+### Supported agents
+
+| Agent | CLI tool | API SDK | Default model |
+|-------|----------|---------|---------------|
+| Claude | `claude` (Claude Code) | `anthropic` | `claude-sonnet-4-20250514` |
+| Codex | `codex` | `openai` | `o3-mini` |
+| Gemini | `gemini` | `google-generativeai` | `gemini-2.5-pro` |
+
+You can enable/disable any agent and mix CLI + API modes. A minimum of 2 agents is required for debate.
+
+---
+
+## Skills
+
+Skills run before agent reviews and inject context signals into each agent's prompt. They do not produce findings directly — agents decide what matters.
+
+| Skill | What it does |
+|-------|-------------|
+| **Data Flow Tracing** | Traces source → sink paths (HTTP params, env vars → exec, eval, subprocess) |
+| **Git Archeology** | Git blame, file history, security-related commit search, code age |
+| **Config Analysis** | CI workflow risks (`pull_request_target`), Dockerfile secrets, CORS permissiveness |
+| **Dependency Analysis** | Diffs dependency manifests, flags added/changed/removed packages, known-risky packages |
+| **Test Coverage Check** | Identifies changed files with no corresponding test files |
+| **Code Navigation** | Import tracing, caller discovery, symbol definitions |
+
+---
+
+## Output Formats
+
+```bash
+# Default: markdown printed to stdout
+crossfire analyze-pr --repo owner/repo --pr 123
+
+# JSON (machine-readable, CI-friendly)
+crossfire analyze-pr --repo owner/repo --pr 123 --format json
+
+# SARIF (GitHub Code Scanning, IDE integration)
+crossfire analyze-pr --repo owner/repo --pr 123 --format sarif --output report.sarif
+
+# Write to file
+crossfire analyze-pr --repo owner/repo --pr 123 --output report.md
+
+# Post as GitHub PR comment automatically
+crossfire analyze-pr --repo owner/repo --pr 123 --post-comment --github-token $GITHUB_TOKEN
+```
+
+---
+
+## CI/CD Integration
+
+### GitHub Actions
+
+```yaml
+- name: CrossFire Security Review
+  run: |
+    pip install crossfire
+    crossfire analyze-pr \
+      --repo ${{ github.repository }} \
+      --pr ${{ github.event.pull_request.number }} \
+      --github-token ${{ secrets.GITHUB_TOKEN }} \
+      --format sarif \
+      --output crossfire.sarif \
+      --post-comment
+
+- name: Upload SARIF
+  uses: github/codeql-action/upload-sarif@v3
+  with:
+    sarif_file: crossfire.sarif
+```
+
+The severity gate (`fail_on: high`, `min_confidence: 0.7`) will exit with code 1 if any confirmed high-severity finding clears the debate. Set `fail_on: critical` to be less strict.
+
+---
 
 ## Development
 
 ```bash
-# Setup
+# Install with dev dependencies
 make setup
 
-# Run tests
+# Run all tests
 make test
 
-# Lint
+# Run unit tests only
+make test-unit
+
+# Lint + type-check
 make lint
 
-# Run demo
+# Auto-fix formatting
+make format
+
+# Run built-in demo
 make demo
 ```
 
+### Project structure
+
+```
+crossfire/
+  cli.py                    # Typer CLI entry point (6 commands)
+  config/
+    defaults.py             # Default configuration values
+    settings.py             # Config loader (CLI > env > YAML > defaults)
+  core/
+    models.py               # All Pydantic v2 models
+    orchestrator.py         # Main pipeline
+    context_builder.py      # Diff parsing + file enrichment
+    intent_inference.py     # What does this repo do?
+    finding_synthesizer.py  # Cluster + dedupe + adjust findings
+    policy_engine.py        # Suppression rules
+    severity.py             # CI gate logic
+  agents/
+    base.py                 # CLI + API dual-mode base class
+    claude_adapter.py
+    codex_adapter.py
+    gemini_adapter.py
+    review_engine.py        # Parallel independent reviews
+    debate_engine.py        # 2-round judge-led debate
+    consensus.py            # Evidence-based verdict logic
+    prompts/                # Prompt builders for each role
+  skills/
+    data_flow_tracing.py
+    git_archeology.py
+    config_analysis.py
+    dependency_analysis.py
+    test_coverage_check.py
+    code_navigation.py
+  output/
+    markdown_report.py
+    json_report.py
+    sarif_report.py
+  integrations/
+    github/
+      pr_loader.py          # GitHub API client
+      comment_poster.py     # PR comment posting
+tests/
+  unit/                     # Fast, no network/LLM calls
+  integration/              # End-to-end with fixtures
+  fixtures/                 # Sample PRs for evaluation
+docs/
+  architecture.md           # Detailed component inventory + wiring diagram
+```
+
+---
+
+## Requirements
+
+- Python 3.11+
+- At least one agent configured (Claude, Codex, or Gemini)
+- For `analyze-pr`: a GitHub token with `repo` read access
+- For `cli` mode: the respective CLI tool installed and on `$PATH`
+- For `api` mode: the API key set in the relevant environment variable
+
+---
+
 ## License
 
-MIT
+GNU General Public License v3.0 — see [LICENSE](LICENSE) for details.
