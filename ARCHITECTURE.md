@@ -8,21 +8,21 @@
 
 | Component | File | Purpose (from code) | Status | Internal Dependencies |
 |-----------|------|---------------------|--------|-----------------------|
-| **CLI Entry Point** | `crossfire/cli.py` | Typer app with 6 commands: `analyze-pr`, `analyze-diff`, `report`, `init`, `config-check`, `demo` | ✅ IMPLEMENTED | `config.settings`, `core.orchestrator`, `core.models`, `core.severity`, `core.context_builder`, `output.*`, `integrations.github.comment_poster` |
+| **CLI Entry Point** | `crossfire/cli.py` | Typer app with 6 commands: `analyze-pr`, `analyze-diff`, `report`, `init`, `config-check`, `demo`. Error handler uses `NoReturn` type. Modern `str | None` union syntax | ✅ IMPLEMENTED | `config.settings`, `core.orchestrator`, `core.models`, `core.severity`, `core.context_builder`, `output.*`, `integrations.github.comment_poster` |
 | **Default Config** | `crossfire/config/defaults.py` | `DEFAULT_CONFIG` dict — nested default values for all settings | ✅ IMPLEMENTED | _(none)_ |
 | **Settings Loader** | `crossfire/config/settings.py` | Loads config with priority: CLI > env > YAML > defaults. Pydantic models for each config section | ✅ IMPLEMENTED | `config.defaults` |
 | **Core Models** | `crossfire/core/models.py` | 25+ Pydantic v2 models: `PRContext`, `Finding`, `DebateRecord`, `CrossFireReport`, enums, etc. | ✅ IMPLEMENTED | _(none — leaf module)_ |
 | **Context Builder** | `crossfire/core/context_builder.py` | Builds `PRContext` from GitHub PRs, local diffs, staged changes, or patch files. Parses diffs, enriches with file content, imports, blame, tests | ✅ IMPLEMENTED | `config.settings.AnalysisConfig`, `core.models`, `integrations.github.pr_loader` |
 | **Intent Inferrer** | `crossfire/core/intent_inference.py` | Multi-signal heuristic engine: README, package metadata, file structure, dependencies, security controls, PR classification | ✅ IMPLEMENTED | `config.settings.RepoConfig`, `core.models` |
-| **Finding Synthesizer** | `crossfire/core/finding_synthesizer.py` | Clusters, merges, dedupes findings from multiple agents. Cross-validation boost. Purpose-aware adjustments. Debate routing tags | ✅ IMPLEMENTED | `core.models` |
+| **Finding Synthesizer** | `crossfire/core/finding_synthesizer.py` | Union-find clustering, merges, dedupes findings from multiple agents. Cross-validation boost. Purpose-aware adjustments. Debate routing tags | ✅ IMPLEMENTED | `core.models` |
 | **Policy Engine** | `crossfire/core/policy_engine.py` | Applies suppression rules (category, file pattern, title pattern) to findings | ✅ IMPLEMENTED | `core.models` |
 | **Severity Gate** | `crossfire/core/severity.py` | `should_fail_ci()` — checks if findings breach severity/confidence threshold | ✅ IMPLEMENTED | `core.models` |
 | **Orchestrator** | `crossfire/core/orchestrator.py` | Main pipeline: context → intent → skills → reviews → synthesis → debate → policy → report | ✅ IMPLEMENTED | `agents.debate_engine`, `agents.review_engine`, `config.settings`, `core.context_builder`, `core.finding_synthesizer`, `core.intent_inference`, `core.models`, `core.policy_engine`, `skills.*` (all 6) |
-| **Base Agent** | `crossfire/agents/base.py` | Abstract base with CLI + API dual-mode execution, JSON parsing, subprocess runner | ✅ IMPLEMENTED | `config.settings.AgentConfig` |
-| **Claude Adapter** | `crossfire/agents/claude_adapter.py` | CLI: `claude -p "..." --output-format json --system-prompt "..."`. API: `anthropic.Anthropic.messages.create()` | ✅ IMPLEMENTED | `agents.base` |
-| **Codex Adapter** | `crossfire/agents/codex_adapter.py` | CLI: `codex -q "{system+user prompt}"`. API: `openai.OpenAI.chat.completions.create()` | ✅ IMPLEMENTED | `agents.base` |
-| **Gemini Adapter** | `crossfire/agents/gemini_adapter.py` | CLI: `gemini "{system+user prompt}"`. API: `google.generativeai.GenerativeModel.generate_content()` | ✅ IMPLEMENTED | `agents.base` |
-| **Review Engine** | `crossfire/agents/review_engine.py` | Dispatches review prompt to all enabled agents in parallel (`asyncio.gather`), parses structured JSON responses into `AgentReview` | ✅ IMPLEMENTED | `agents.base`, `agents.claude_adapter`, `agents.codex_adapter`, `agents.gemini_adapter`, `agents.prompts.review_prompt`, `config.settings`, `core.models` |
+| **Base Agent** | `crossfire/agents/base.py` | Abstract base with CLI + API dual-mode execution, JSON parsing, subprocess runner (with FileNotFoundError → AgentError conversion) | ✅ IMPLEMENTED | `config.settings.AgentConfig` |
+| **Claude Adapter** | `crossfire/agents/claude_adapter.py` | CLI: `claude -p "..." --output-format json --system-prompt "..."`. API: `anthropic.AsyncAnthropic.messages.create()` with timeout | ✅ IMPLEMENTED | `agents.base` |
+| **Codex Adapter** | `crossfire/agents/codex_adapter.py` | CLI: `codex -q "{system+user prompt}"`. API: `openai.AsyncOpenAI.chat.completions.create()` with timeout | ✅ IMPLEMENTED | `agents.base` |
+| **Gemini Adapter** | `crossfire/agents/gemini_adapter.py` | CLI: `gemini "{system+user prompt}"`. API: `google.generativeai.GenerativeModel.generate_content_async()` with `asyncio.wait_for` timeout | ✅ IMPLEMENTED | `agents.base` |
+| **Review Engine** | `crossfire/agents/review_engine.py` | Dispatches review prompt to all enabled agents in parallel (`asyncio.gather`), parses structured JSON responses into `AgentReview` with case-insensitive enum parsing via `_parse_enum_flexible()` | ✅ IMPLEMENTED | `agents.base`, `agents.claude_adapter`, `agents.codex_adapter`, `agents.gemini_adapter`, `agents.prompts.review_prompt`, `config.settings`, `core.models` |
 | **Debate Engine** | `crossfire/agents/debate_engine.py` | Orchestrates 4-phase debate: prosecution → defense → rebuttal (optional) → judge. Role rotation or fixed assignment | ✅ IMPLEMENTED | `agents.base`, `agents.claude_adapter`, `agents.codex_adapter`, `agents.gemini_adapter`, `agents.consensus`, `agents.prompts.prosecutor_prompt`, `agents.prompts.defense_prompt`, `agents.prompts.judge_prompt`, `config.settings`, `core.models` |
 | **Consensus Logic** | `crossfire/agents/consensus.py` | Evidence-quality-based verdict: judge position + cross-checks + purpose-aware override + minimum evidence thresholds | ✅ IMPLEMENTED | `core.models` |
 | **Review Prompt** | `crossfire/agents/prompts/review_prompt.py` | System prompt + `build_review_prompt()` — formats all context for agent review | ✅ IMPLEMENTED | `core.models` |
@@ -38,13 +38,12 @@
 | **Code Navigation** | `crossfire/skills/code_navigation.py` | Import tracing, caller discovery via `git grep`, symbol definition search | ✅ IMPLEMENTED | `skills.base` |
 | **Markdown Report** | `crossfire/output/markdown_report.py` | Generates markdown report: summary table, findings by status, debate logs, purpose assessments | ✅ IMPLEMENTED | `core.models` |
 | **JSON Report** | `crossfire/output/json_report.py` | `report.model_dump_json(indent=2)` — direct Pydantic serialization | ✅ IMPLEMENTED | `core.models` |
-| **SARIF Report** | `crossfire/output/sarif_report.py` | SARIF v2.1.0 with rules, results, locations. Filters rejected findings | ✅ IMPLEMENTED | `core.models` |
-| **PR Loader** | `crossfire/integrations/github/pr_loader.py` | Async httpx client: fetches PR metadata, diff, file contents (head+base), README, repo info, commits | ⚠️ PARTIAL | `config.settings.AnalysisConfig`, `core.models`, `core.context_builder.parse_diff` |
+| **SARIF Report** | `crossfire/output/sarif_report.py` | SARIF v2.1.0 with rules (help text), results (partialFingerprints, rank, code snippets, relatedLocations), run properties. Filters rejected findings | ✅ IMPLEMENTED | `core.models` |
+| **PR Loader** | `crossfire/integrations/github/pr_loader.py` | Async httpx client: fetches PR metadata, diff, file contents (head+base in parallel), README, repo info, commits, manifest files. Populates `config_files`, `ci_config_files`, `directory_structure` | ✅ IMPLEMENTED | `config.settings.AnalysisConfig`, `core.models`, `core.context_builder.parse_diff` |
 | **Comment Poster** | `crossfire/integrations/github/comment_poster.py` | Posts/updates review comment on GitHub PR via Issues API | ✅ IMPLEMENTED | _(none — uses httpx directly)_ |
 
 ### Status Legend
 - ✅ **IMPLEMENTED** — Code is present, connected, and functional
-- ⚠️ **PARTIAL** — Code exists but missing fields: `config_files`, `ci_config_files`, `directory_structure` never populated
 
 ---
 
@@ -159,7 +158,7 @@ flowchart TD
     CTX -->|"async"| PR_LOAD
     CTX -->|"parse_diff()"| CTX_DIFF
     CTX -->|"_enrich_file_context()"| CTX_ENRICH
-    PR_LOAD -.->|"⚠️ Missing: config_files, ci_config_files, directory_structure"| M_CTX
+    PR_LOAD -->|"config_files, ci_config_files, directory_structure"| M_CTX
 
     %% Pipeline steps
     PIPELINE -->|"1. infer(context) → IntentProfile"| INFERRER
@@ -204,15 +203,10 @@ flowchart TD
     CMD_DIFF -->|"_check_severity_gate()"| SEVERITY
     CMD_REPORT -->|"_output_report(report, fmt)"| MD_RPT
 
-    %% Styling
-    style PR_LOAD fill:#fff3cd,stroke:#ffc107
-    style SKILL_RUN fill:#fff3cd,stroke:#ffc107
 ```
 
 ### Connection Legend
 - **Solid arrows** → real, working connections
-- **Dashed arrows with ⚠️** → partial/degraded connections
-- **Yellow nodes** → components with known issues
 
 ---
 
@@ -491,37 +485,43 @@ cli.py:37 analyze_pr(repo: str, pr: int, github_token: str, agents: str|None,
 │  ├─ core/context_builder.py:569 build_from_github_pr(repo, pr_number, github_token)
 │  │  └─ integrations/github/pr_loader.py:13 load_pr_context(repo, pr_number, token, config)
 │  │     ├─ httpx GET /repos/{repo}/pulls/{pr_number} → pr_data
-│  │     ├─ httpx GET /repos/{repo}/pulls/{pr_number}/files → files_data  💀 UNUSED
+│  │     ├─ _fetch_all_pr_files(client, repo, pr) → files_data (paginated, 100/page)
 │  │     ├─ httpx GET /repos/{repo}/pulls/{pr_number} (Accept: diff) → diff_text
 │  │     ├─ core/context_builder.py:143 parse_diff(diff_text) → list[FileContext]
-│  │     ├─ for each FileContext:
+│  │     ├─ asyncio.gather(*[_fetch_file_content(fc) for fc in files])  ← parallel
 │  │     │  ├─ httpx GET /repos/{repo}/contents/{path}?ref=head → fc.content
 │  │     │  └─ httpx GET /repos/{repo}/contents/{old_path|path}?ref=base → fc.base_content
-│  │     ├─ httpx GET /repos/{repo}/readme → readme_content
-│  │     ├─ httpx GET /repos/{repo} → repo_description
-│  │     ├─ httpx GET /repos/{repo}/pulls/{pr_number}/commits → commit_messages
-│  │     └─ Returns PRContext  ⚠️ (config_files, ci_config_files, directory_structure empty)
+│  │     ├─ asyncio.gather(readme_task, repo_task, commits_task)  ← parallel
+│  │     │  ├─ httpx GET /repos/{repo}/readme → readme_content
+│  │     │  ├─ httpx GET /repos/{repo} → repo_description
+│  │     │  └─ httpx GET /repos/{repo}/pulls/{pr_number}/commits → commit_messages
+│  │     ├─ Fetch manifest files for intent inference (requirements.txt, package.json, etc.)
+│  │     ├─ _build_directory_structure(file_paths) → directory tree string
+│  │     ├─ Identify config_files and ci_config_files from changed files
+│  │     └─ Returns PRContext (fully populated including config_files, ci_config_files, directory_structure)
 │  │
-│  └─ core/orchestrator.py:105 _run_pipeline(context, skip_debate)  ← NOTE: no repo_dir passed
+│  └─ core/orchestrator.py:105 _run_pipeline(context, skip_debate, repo_dir=None)
 │     │
 │     ├─ [Step 1] core/intent_inference.py:136 infer(context) → IntentProfile
 │     │  ├─ _extract_purpose_from_readme(readme)
-│     │  ├─ _analyze_package_metadata(config_files)  ⚠️ empty for GH PRs
-│     │  ├─ _analyze_file_structure(directory_structure)  ⚠️ empty for GH PRs
-│     │  ├─ _analyze_dependencies(config_files)  ⚠️ empty for GH PRs
+│     │  ├─ _analyze_package_metadata(config_files)  ✅ populated for GH PRs
+│     │  ├─ _analyze_file_structure(directory_structure)  ✅ populated for GH PRs
+│     │  ├─ _analyze_dependencies(config_files)  ✅ populated for GH PRs
 │     │  ├─ _detect_security_controls(context)
 │     │  ├─ _infer_trust_boundaries(capabilities, controls)
 │     │  ├─ _classify_pr_intent(title, description)
 │     │  ├─ _analyze_risk_surface_change(context)
 │     │  └─ _detect_sensitive_paths(context)
 │     │
-│     ├─ [Step 2] _run_skills(context, intent, repo_dir=".")  ⚠️ skills run against CWD
-│     │  ├─ DataFlowTracingSkill().execute(".", changed_files)
-│     │  ├─ GitArcheologySkill().execute(".", changed_files)
-│     │  ├─ ConfigAnalysisSkill().execute(".", changed_files)
-│     │  ├─ DependencyAnalysisSkill().execute(".", changed_files, file_contexts=context.files)
-│     │  ├─ TestCoverageCheckSkill().execute(".", changed_files)
-│     │  └─ CodeNavigationSkill().execute(".", changed_files)
+│     ├─ [Step 2] if repo_dir is not None:
+│     │  │  await asyncio.to_thread(_run_skills, context, intent, repo_dir)
+│     │  │  ├─ DataFlowTracingSkill().execute(repo_dir, changed_files)
+│     │  │  ├─ GitArcheologySkill().execute(repo_dir, changed_files)
+│     │  │  ├─ ConfigAnalysisSkill().execute(repo_dir, changed_files)
+│     │  │  ├─ DependencyAnalysisSkill().execute(repo_dir, changed_files, file_contexts=context.files)
+│     │  │  ├─ TestCoverageCheckSkill().execute(repo_dir, changed_files)
+│     │  │  └─ CodeNavigationSkill().execute(repo_dir, changed_files)
+│     │  └─ else: skills skipped (no local checkout for GH PRs)
 │     │
 │     ├─ [Step 3] agents/review_engine.py:143 run_independent_reviews(ctx, intent, skill_outputs)
 │     │  ├─ build_review_prompt(context, intent, skill_outputs) → prompt string
@@ -535,7 +535,7 @@ cli.py:37 analyze_pr(repo: str, pr: int, github_token: str, agents: str|None,
 │     │
 │     ├─ [Step 4] core/finding_synthesizer.py:125 synthesize(reviews, intent)
 │     │  ├─ Collect all findings from all reviews
-│     │  ├─ Cluster similar findings (_is_similar_finding)
+│     │  ├─ Union-find clustering of similar findings (_is_similar_finding)
 │     │  ├─ Merge clusters (_merge_findings)
 │     │  ├─ Cross-validation confidence boost (2 agents: ×1.2, 3+: ×1.4)
 │     │  ├─ _apply_purpose_aware_adjustments(finding, intent)
@@ -917,8 +917,8 @@ ASYNC WORLD:
   │   ├─ analyze_pr() — async
   │   ├─ analyze_diff() — async
   │   └─ _run_pipeline() — async
-  │       └─ But: _run_skills() is SYNC within async pipeline
-  │              (calls subprocess.run, open() — blocks event loop)
+  │       └─ _run_skills() offloaded via asyncio.to_thread() — does not block event loop
+  │          Skills skipped entirely when repo_dir is None (GitHub PR mode)
   │
   ├─ core/context_builder.py
   │   └─ build_from_github_pr() — async
@@ -938,10 +938,10 @@ ASYNC WORLD:
   │
   ├─ agents/*_adapter.py
   │   ├─ _run_cli() — async (delegates to _run_subprocess)
-  │   └─ _run_api() — async  ⚠️ Claude/Codex use SYNC SDK clients
-  │       ├─ claude: anthropic.Anthropic.messages.create() — SYNC in async context
-  │       ├─ codex: openai.OpenAI.chat.completions.create() — SYNC in async context
-  │       └─ gemini: genai.GenerativeModel.generate_content() — SYNC in async context
+  │   └─ _run_api() — async (all use native async SDK clients)
+  │       ├─ claude: anthropic.AsyncAnthropic.messages.create() — fully async with timeout
+  │       ├─ codex: openai.AsyncOpenAI.chat.completions.create() — fully async with timeout
+  │       └─ gemini: genai.GenerativeModel.generate_content_async() — async with asyncio.wait_for timeout
   │
   ├─ agents/debate_engine.py
   │   ├─ debate_all() — async
@@ -957,14 +957,16 @@ ASYNC WORLD:
 
 ### Sync-in-Async Issues
 
-| Location | Issue | Severity |
-|----------|-------|----------|
-| `orchestrator._run_skills()` | Sync method called within async `_run_pipeline()`. All 6 skills use `subprocess.run()` and `open()` which block the event loop | ⚠️ Medium — mitigated because skills run sequentially before async agent calls |
-| `claude_adapter._run_api()` | Uses sync `anthropic.Anthropic` client instead of `anthropic.AsyncAnthropic` | ⚠️ Medium — blocks event loop during API call |
-| `codex_adapter._run_api()` | Uses sync `openai.OpenAI` client instead of `openai.AsyncOpenAI` | ⚠️ Medium |
-| `gemini_adapter._run_api()` | Uses sync `genai.GenerativeModel.generate_content()` | ⚠️ Medium |
+All previously identified sync-in-async issues have been resolved:
 
-> Note: All three API adapters use sync SDK clients wrapped in async methods. Since reviews are dispatched with `asyncio.gather()`, the sync API calls will actually execute sequentially rather than concurrently when using API mode. CLI mode (`_run_subprocess`) is properly async.
+| Location | Resolution |
+|----------|-----------|
+| `orchestrator._run_skills()` | Now offloaded via `asyncio.to_thread()` — skills run in a thread pool, no longer blocking the event loop. Skipped entirely for GitHub PR mode (no local checkout) |
+| `claude_adapter._run_api()` | Now uses `anthropic.AsyncAnthropic` with configurable timeout |
+| `codex_adapter._run_api()` | Now uses `openai.AsyncOpenAI` with configurable timeout |
+| `gemini_adapter._run_api()` | Now uses `generate_content_async()` with `asyncio.wait_for` timeout |
+
+> All three API adapters use native async SDK clients. Reviews dispatched via `asyncio.gather()` now execute truly concurrently in both CLI and API modes.
 
 ---
 
@@ -994,7 +996,7 @@ Loading:
 | Component | Receives Config Via | Fields Actually Read |
 |-----------|-------------------|---------------------|
 | `CrossFireOrchestrator` | Constructor: `settings: CrossFireSettings` | `settings.analysis`, `settings.repo`, `settings.agents`, `settings.debate`, `settings.skills`, `settings.suppressions` |
-| `ContextBuilder` | Constructor: `analysis_config: AnalysisConfig` | `context_depth`, `max_related_files` |
+| `ContextBuilder` | Constructor: `analysis_config: AnalysisConfig` | `context_depth`, `max_related_files`, `include_test_files` |
 | `IntentInferrer` | Constructor: `repo_config: RepoConfig` | `purpose`, `intended_capabilities`, `sensitive_paths` |
 | `ReviewEngine` | Constructor: `settings: CrossFireSettings` | `settings.agents` (which are enabled, their AgentConfig) |
 | `DebateEngine` | Constructor: `settings: CrossFireSettings` | `settings.debate` (role_assignment, fixed_roles, enable_rebuttal, min_agents_for_debate), `settings.agents` |
@@ -1007,9 +1009,10 @@ Loading:
 
 | Field | Defined In | Issue |
 |-------|-----------|-------|
-| `include_test_files` | `AnalysisConfig` | 💀 Never checked — test files always included |
 | `require_evidence_citations` | `DebateConfig` | 💀 Never validated — no code checks that arguments contain citations |
 | `verbose` | CLI flags in 3 commands | 💀 Accepted but never wired to logging |
+
+> `include_test_files` (previously listed here) is now wired — `ContextBuilder` checks this config before calling `_find_test_files()`.
 
 ---
 
@@ -1019,16 +1022,17 @@ Loading:
 
 | Endpoint | Method | Used In | Purpose |
 |----------|--------|---------|---------|
-| `/repos/{repo}/pulls/{pr}` | GET | `pr_loader.py:32` | PR metadata (title, body, author, base/head refs, labels) |
-| `/repos/{repo}/pulls/{pr}/files` | GET | `pr_loader.py:37` | 💀 Fetched but `files_data` never used |
-| `/repos/{repo}/pulls/{pr}` | GET (Accept: diff) | `pr_loader.py:45` | Raw unified diff |
-| `/repos/{repo}/contents/{path}?ref={sha}` | GET (Accept: raw) | `pr_loader.py:63, 74` | File content at head/base ref |
-| `/repos/{repo}/readme` | GET (Accept: raw) | `pr_loader.py:84` | README content |
-| `/repos/{repo}` | GET | `pr_loader.py:92` | Repo description |
-| `/repos/{repo}/pulls/{pr}/commits` | GET | `pr_loader.py:96` | Commit messages |
-| `/repos/{repo}/issues/{pr}/comments` | GET | `comment_poster.py:30` | Check for existing CrossFire comment |
-| `/repos/{repo}/issues/comments/{id}` | PATCH | `comment_poster.py:43` | Update existing comment |
-| `/repos/{repo}/issues/{pr}/comments` | POST | `comment_poster.py:49` | Create new comment |
+| `/repos/{repo}/pulls/{pr}` | GET | `pr_loader.py` | PR metadata (title, body, author, base/head refs, labels) |
+| `/repos/{repo}/pulls/{pr}/files?per_page=100&page=N` | GET | `pr_loader.py` | PR file list (paginated, used for directory structure, config/CI file identification) |
+| `/repos/{repo}/pulls/{pr}` | GET (Accept: diff) | `pr_loader.py` | Raw unified diff |
+| `/repos/{repo}/contents/{path}?ref={sha}` | GET (Accept: raw) | `pr_loader.py` | File content at head/base ref (fetched in parallel via asyncio.gather) |
+| `/repos/{repo}/readme` | GET (Accept: raw) | `pr_loader.py` | README content |
+| `/repos/{repo}` | GET | `pr_loader.py` | Repo description |
+| `/repos/{repo}/pulls/{pr}/commits` | GET | `pr_loader.py` | Commit messages |
+| `/repos/{repo}/contents/{manifest}?ref={head}` | GET (Accept: raw) | `pr_loader.py` | Manifest files for intent inference (requirements.txt, package.json, etc.) |
+| `/repos/{repo}/issues/{pr}/comments?per_page=100&page=N` | GET | `comment_poster.py` | Check for existing CrossFire comment (paginated) |
+| `/repos/{repo}/issues/comments/{id}` | PATCH | `comment_poster.py` | Update existing comment |
+| `/repos/{repo}/issues/{pr}/comments` | POST | `comment_poster.py` | Create new comment |
 
 Auth: `Bearer {GITHUB_TOKEN}` header on all requests.
 
@@ -1036,7 +1040,7 @@ Auth: `Bearer {GITHUB_TOKEN}` header on all requests.
 
 ```
 Command: claude -p "{prompt}" --output-format json --system-prompt "{system_prompt}" {extra_cli_args}
-Fallback: anthropic.Anthropic(api_key=ANTHROPIC_API_KEY).messages.create(
+Fallback: anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY, timeout=config.timeout).messages.create(
             model="{config.model}", system="{system_prompt}",
             messages=[{"role": "user", "content": "{prompt}"}], max_tokens=8192)
 ```
@@ -1045,7 +1049,7 @@ Fallback: anthropic.Anthropic(api_key=ANTHROPIC_API_KEY).messages.create(
 
 ```
 Command: codex -q "{system_prompt}\n\n{prompt}" {extra_cli_args}
-Fallback: openai.OpenAI(api_key=OPENAI_API_KEY).chat.completions.create(
+Fallback: openai.AsyncOpenAI(api_key=OPENAI_API_KEY, timeout=config.timeout).chat.completions.create(
             model="{config.model}",
             messages=[{"role": "system", "content": "..."}, {"role": "user", "content": "..."}])
 ```
@@ -1054,8 +1058,10 @@ Fallback: openai.OpenAI(api_key=OPENAI_API_KEY).chat.completions.create(
 
 ```
 Command: gemini "{system_prompt}\n\n{prompt}" {extra_cli_args}
-Fallback: google.generativeai.GenerativeModel("{config.model}",
-            system_instruction="{system_prompt}").generate_content("{prompt}")
+Fallback: await asyncio.wait_for(
+            google.generativeai.GenerativeModel("{config.model}",
+                system_instruction="{system_prompt}").generate_content_async("{prompt}"),
+            timeout=config.timeout)
 ```
 
 ### Local Git (subprocess.run — sync)
@@ -1089,10 +1095,9 @@ Fallback: google.generativeai.GenerativeModel("{config.model}",
 
 | Package | In pyproject.toml | Actually Used? |
 |---------|-------------------|---------------|
-| `gitpython>=3.1` | Yes | 💀 Never imported — git ops use `subprocess` |
-| `pygithub>=2.0` | Yes | 💀 Never imported — PR loading uses `httpx` |
-| `pydantic-settings>=2.0` | Yes | 💀 Never imported — config uses manual YAML loading |
 | `respx>=0.21` (dev) | Yes | 💀 Never imported in any test |
+
+> Previously unused dependencies `gitpython`, `pygithub`, and `pydantic-settings` have been removed from `pyproject.toml`.
 
 ---
 
@@ -1101,12 +1106,14 @@ Fallback: google.generativeai.GenerativeModel("{config.model}",
 | Item | File:Line | Type |
 |------|-----------|------|
 | `ROLE_CYCLE` | `debate_engine.py:45` | 💀 Dead constant |
-| `files_data` | `pr_loader.py:42` | 💀 Dead variable (API call result unused) |
-| `emoji` | `markdown_report.py:130` | 💀 Dead variable (assigned, never output) |
 | `SEVERITY_ORDER` | `consensus.py:17` | Duplicate of `finding_synthesizer.py:21` and `severity.py:7` |
 | `AGENT_CLASSES` | `debate_engine.py:39` | Duplicate of `review_engine.py:35` |
-| `_severity_max()` | `finding_synthesizer.py:29` | 💀 Dead function (never called) |
 | `analyze_permissions()` | `config_analysis.py:179` | 💀 Dead method (never called from `execute()`) |
 | `detect_lockfile_inconsistency()` | `dependency_analysis.py:197` | 💀 Dead method (never called) |
 | `find_definitions()` | `code_navigation.py:137` | 💀 Dead method (never called from `execute()`) |
 | `context_files` param | `base.py:41`, all 3 adapters | 💀 Accepted but never read |
+
+> Resolved dead code (removed in previous fixes):
+> - `files_data` in `pr_loader.py` — now used for directory structure, config/CI file identification
+> - `emoji` / `SEVERITY_EMOJI` / `STATUS_EMOJI` in `markdown_report.py` — removed
+> - `_severity_max()` in `finding_synthesizer.py` — removed
