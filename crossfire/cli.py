@@ -95,6 +95,8 @@ def analyze_pr(
         repo=repo, pr_number=pr, github_token=github_token,
     )
 
+    _check_severity_gate(report, settings)
+
 
 @app.command()
 def analyze_diff(
@@ -158,6 +160,8 @@ def analyze_diff(
     ))
 
     _output_report(report, format, output, False)
+
+    _check_severity_gate(report, settings)
 
 
 @app.command()
@@ -278,6 +282,29 @@ def demo(
     report = asyncio.run(orchestrator._run_pipeline(pr_context, skip_debate=False))
 
     _output_report(report, format, None, False)
+
+
+def _check_severity_gate(report: object, settings: object) -> None:
+    """Check severity gate and exit with code 1 if findings breach the threshold."""
+    from crossfire.config.settings import CrossFireSettings
+    from crossfire.core.models import CrossFireReport
+    from crossfire.core.severity import should_fail_ci
+
+    assert isinstance(report, CrossFireReport)
+    assert isinstance(settings, CrossFireSettings)
+
+    if should_fail_ci(
+        findings=report.findings,
+        fail_on=settings.severity_gate.fail_on,
+        min_confidence=settings.severity_gate.min_confidence,
+        require_debate=settings.severity_gate.require_debate,
+    ):
+        console.print(
+            f"[red]Severity gate FAILED:[/red] findings at or above "
+            f"{settings.severity_gate.fail_on} severity with confidence >= "
+            f"{settings.severity_gate.min_confidence}"
+        )
+        raise typer.Exit(1)
 
 
 def _output_report(
