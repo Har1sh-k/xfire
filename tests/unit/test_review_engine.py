@@ -1,10 +1,23 @@
 """Tests for the review engine — agent dispatch and response parsing."""
 
-from crossfire.agents.review_engine import _parse_enum_flexible, _parse_finding_from_raw
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+from crossfire.agents.base import AgentError
+from crossfire.agents.review_engine import (
+    ReviewEngine,
+    _create_agent,
+    _parse_enum_flexible,
+    _parse_finding_from_raw,
+)
+from crossfire.config.settings import AgentConfig, CrossFireSettings
 from crossfire.core.models import (
     BlastRadius,
     Exploitability,
     FindingCategory,
+    IntentProfile,
+    PRContext,
     Severity,
 )
 
@@ -124,3 +137,106 @@ class TestParseFindingFromRaw:
         assert finding is not None
         assert finding.purpose_aware_assessment.is_intended_capability is True
         assert finding.purpose_aware_assessment.isolation_controls_present is True
+
+
+# ─── Agent Creation Tests ────────────────────────────────────────────────────
+
+
+class TestCreateAgent:
+    def test_claude(self):
+        config = AgentConfig(enabled=True, cli_command="claude")
+        agent = _create_agent("claude", config)
+        assert agent.name == "claude"
+
+    def test_codex(self):
+        config = AgentConfig(enabled=True, cli_command="codex")
+        agent = _create_agent("codex", config)
+        assert agent.name == "codex"
+
+    def test_gemini(self):
+        config = AgentConfig(enabled=True, cli_command="gemini")
+        agent = _create_agent("gemini", config)
+        assert agent.name == "gemini"
+
+    def test_unknown_raises(self):
+        config = AgentConfig(enabled=True)
+        with pytest.raises(ValueError, match="Unknown agent"):
+            _create_agent("gpt4", config)
+
+
+# ─── Run Independent Reviews Tests ──────────────────────────────────────────
+
+
+class TestRunIndependentReviews:
+    @pytest.mark.asyncio
+    async def test_returns_reviews(self):
+        """Successful agent call returns parsed reviews."""
+        settings = CrossFireSettings(
+            agents={"claude": AgentConfig(enabled=True, cli_command="claude")},
+        )
+        engine = ReviewEngine(settings)
+        mock_response = '{"findings": [], "overall_risk": "none"}'
+        with patch(
+            "crossfire.agents.review_engine._create_agent"
+        ) as mock_create:
+            mock_agent = MagicMock()
+            mock_agent.name = "claude"
+            mock_agent.execute = AsyncMock(return_value=mock_response)
+            mock_agent.parse_json_response.return_value = {
+                "findings": [],
+                "overall_risk": "none",
+            }
+            mock_create.return_value = mock_agent
+            reviews = await engine.run_independent_reviews(
+                PRContext(repo_name="test/repo", pr_title="Test"),
+                IntentProfile(),
+                {},
+            )
+        assert len(reviews) == 1
+        assert reviews[0].agent_name == "claude"
+
+    @pytest.mark.asyncio
+    async def test_handles_failure(self):
+        """Agent that raises AgentError still returns remaining reviews."""
+        settings = CrossFireSettings(
+            agents={
+                "claude": AgentConfig(enabled=True, cli_command="claude"),
+                "codex": AgentConfig(enabled=True, cli_command="codex"),
+            },
+        )
+        engine = ReviewEngine(settings)
+        with patch(
+            "crossfire.agents.review_engine._create_agent"
+        ) as mock_create:
+            mock_claude = MagicMock()
+            mock_claude.name = "claude"
+            mock_claude.execute = AsyncMock(side_effect=AgentError("claude", "timeout"))
+
+            mock_codex = MagicMock()
+            mock_codex.name = "codex"
+            mock_codex.execute = AsyncMock(return_value='{"findings":[]}')
+            mock_codex.parse_json_response.return_value = {"findings": []}
+
+            mock_create.side_effect = [mock_claude, mock_codex]
+            reviews = await engine.run_independent_reviews(
+                PRContext(repo_name="test/repo", pr_title="Test"),
+                IntentProfile(),
+                {},
+            )
+        # claude failed, codex succeeded → 1 review
+        assert len(reviews) == 1
+        assert reviews[0].agent_name == "codex"
+
+    @pytest.mark.asyncio
+    async def test_no_enabled_agents(self):
+        """Returns empty list when no agents are enabled."""
+        settings = CrossFireSettings(
+            agents={"claude": AgentConfig(enabled=False)},
+        )
+        engine = ReviewEngine(settings)
+        reviews = await engine.run_independent_reviews(
+            PRContext(repo_name="test/repo", pr_title="Test"),
+            IntentProfile(),
+            {},
+        )
+        assert reviews == []

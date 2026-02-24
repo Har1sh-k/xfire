@@ -1,5 +1,7 @@
 """Tests for the debate engine — role assignment, formatting, routing, and budget."""
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 
 from crossfire.agents.base import AgentError
@@ -20,6 +22,8 @@ from crossfire.core.finding_synthesizer import (
 from crossfire.core.models import (
     AgentArgument,
     AgentReview,
+    ConsensusOutcome,
+    DebateRecord,
     DebateTag,
     Evidence,
     Finding,
@@ -614,3 +618,135 @@ class TestPickByPreference:
     def test_returns_none_for_empty_candidates(self):
         result = DebateEngine._pick_by_preference(["codex"], [])
         assert result is None
+
+
+# ─── Debate All Tests ────────────────────────────────────────────────────────
+
+
+class TestDebateAll:
+    @pytest.mark.asyncio
+    async def test_budget_exhaustion(self):
+        """Findings beyond the budget are skipped with UNCLEAR status."""
+        settings = _make_settings(role_assignment="evidence")
+        engine = DebateEngine(settings)
+
+        findings = [
+            _make_finding(
+                title=f"Finding {i}",
+                reviewing_agents=["claude"],
+            )
+            for i in range(3)
+        ]
+
+        # Mock _debate_single to consume 2 rounds each time
+        debate_record = DebateRecord(
+            finding_id="x",
+            prosecutor_argument=AgentArgument(
+                agent_name="claude", role="prosecutor",
+                position="real_issue", argument="yes", confidence=0.8,
+            ),
+            defense_argument=AgentArgument(
+                agent_name="codex", role="defense",
+                position="false_positive", argument="no", confidence=0.4,
+            ),
+            judge_ruling=AgentArgument(
+                agent_name="gemini", role="judge",
+                position="Confirmed", argument="agreed", confidence=0.8,
+            ),
+            rounds_used=2,
+            consensus=ConsensusOutcome.CONFIRMED,
+        )
+
+        with patch.object(engine, "_debate_single", new_callable=AsyncMock, return_value=debate_record):
+            results = await engine.debate_all(
+                findings=findings,
+                context=PRContext(repo_name="test/repo", pr_title="Test"),
+                intent=IntentProfile(),
+                debate_budget=3,  # only enough for ~1.5 debates
+            )
+
+        # First finding debated (2 rounds), second debated would exceed budget
+        assert len(results) >= 1
+        # At least one finding should be marked budget-exhausted
+        exhausted = [f for f in findings if f.debate_summary and "budget" in f.debate_summary.lower()]
+        assert len(exhausted) >= 1
+
+    @pytest.mark.asyncio
+    async def test_debate_error_handled(self):
+        """A debate that raises an exception marks the finding UNCLEAR."""
+        settings = _make_settings(role_assignment="evidence")
+        engine = DebateEngine(settings)
+
+        finding = _make_finding(reviewing_agents=["claude"])
+
+        with patch.object(engine, "_debate_single", new_callable=AsyncMock, side_effect=RuntimeError("boom")):
+            results = await engine.debate_all(
+                findings=[finding],
+                context=PRContext(repo_name="test/repo", pr_title="Test"),
+                intent=IntentProfile(),
+                debate_budget=10,
+            )
+
+        assert results == []
+        assert finding.status == FindingStatus.UNCLEAR
+
+
+# ─── Apply Debate Result Tests ───────────────────────────────────────────────
+
+
+class TestApplyDebateResult:
+    def test_confirmed(self):
+        settings = _make_settings()
+        engine = DebateEngine(settings)
+        finding = _make_finding()
+        debate = DebateRecord(
+            finding_id=finding.id,
+            prosecutor_argument=AgentArgument(
+                agent_name="claude", role="prosecutor",
+                position="real_issue", argument="yes", confidence=0.9,
+            ),
+            defense_argument=AgentArgument(
+                agent_name="codex", role="defense",
+                position="false_positive", argument="no", confidence=0.3,
+            ),
+            judge_ruling=AgentArgument(
+                agent_name="gemini", role="judge",
+                position="Confirmed", argument="agreed", confidence=0.9,
+            ),
+            rounds_used=1,
+            consensus=ConsensusOutcome.CONFIRMED,
+            final_severity=Severity.HIGH,
+            final_confidence=0.9,
+        )
+        engine._apply_debate_result(finding, debate)
+        assert finding.status == FindingStatus.CONFIRMED
+        assert finding.confidence == 0.9
+        assert finding.consensus_outcome == "Confirmed"
+
+    def test_rejected(self):
+        settings = _make_settings()
+        engine = DebateEngine(settings)
+        finding = _make_finding()
+        debate = DebateRecord(
+            finding_id=finding.id,
+            prosecutor_argument=AgentArgument(
+                agent_name="claude", role="prosecutor",
+                position="real_issue", argument="yes", confidence=0.4,
+            ),
+            defense_argument=AgentArgument(
+                agent_name="codex", role="defense",
+                position="false_positive", argument="no", confidence=0.9,
+            ),
+            judge_ruling=AgentArgument(
+                agent_name="gemini", role="judge",
+                position="Rejected", argument="not real", confidence=0.8,
+            ),
+            rounds_used=1,
+            consensus=ConsensusOutcome.REJECTED,
+            final_severity=Severity.LOW,
+            final_confidence=0.2,
+        )
+        engine._apply_debate_result(finding, debate)
+        assert finding.status == FindingStatus.REJECTED
+        assert finding.confidence == 0.2
+        assert finding.consensus_outcome == "Rejected"
