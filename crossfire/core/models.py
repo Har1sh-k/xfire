@@ -215,6 +215,8 @@ class PRContext(BaseModel):
     author: str = ""
     base_branch: str = "main"
     head_branch: str = ""
+    head_sha: str = ""
+    base_sha: str = ""
     files: list[FileContext] = Field(default_factory=list)
     commit_messages: list[str] = Field(default_factory=list)
     labels: list[str] = Field(default_factory=list)
