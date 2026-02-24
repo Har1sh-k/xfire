@@ -1,7 +1,8 @@
 """Tests for intent inference."""
 
+from crossfire.config.settings import RepoConfig
 from crossfire.core.intent_inference import IntentInferrer
-from crossfire.core.models import FileContext, DiffHunk, PRContext
+from crossfire.core.models import FileContext, DiffHunk, PRContext, RelatedFile
 
 
 def _make_context(**kwargs) -> PRContext:
@@ -204,3 +205,100 @@ class TestSensitivePaths:
         intent = inferrer.infer(ctx)
         assert "auth/login.py" in intent.sensitive_paths
         assert "utils/helpers.py" not in intent.sensitive_paths
+
+
+# ─── Package Metadata Tests ──────────────────────────────────────────────────
+
+
+class TestAnalyzePackageMetadata:
+    def test_pyproject_description(self):
+        inferrer = IntentInferrer()
+        purpose, caps = inferrer._analyze_package_metadata(
+            {"pyproject.toml": 'description = "A CLI for managing deployments"'}
+        )
+        assert "CLI for managing deployments" in purpose
+
+    def test_package_json_bin(self):
+        inferrer = IntentInferrer()
+        purpose, caps = inferrer._analyze_package_metadata(
+            {"package.json": '{"description":"web tool","bin":"./cli.js","scripts":{"start":"node ."}}'}
+        )
+        assert "cli_tool" in caps
+        assert "runnable_service" in caps
+
+    def test_empty_config_files(self):
+        inferrer = IntentInferrer()
+        purpose, caps = inferrer._analyze_package_metadata({})
+        assert purpose == ""
+        assert caps == []
+
+
+# ─── Deep Security Controls Detection Tests ──────────────────────────────────
+
+
+class TestDetectSecurityControlsDeep:
+    def test_detects_controls_in_related_files(self):
+        """Controls found in related file content are detected."""
+        inferrer = IntentInferrer()
+        ctx = _make_context(
+            files=[
+                FileContext(
+                    path="api/views.py",
+                    content="def index(): pass",
+                    related_files=[
+                        RelatedFile(
+                            path="auth/middleware.py",
+                            relationship="imports",
+                            content="@login_required\ndef secure(): pass",
+                            relevance="imported by views.py",
+                        ),
+                    ],
+                ),
+            ],
+        )
+        controls = inferrer._detect_security_controls(ctx)
+        assert any(c.control_type == "auth_decorator" for c in controls)
+
+    def test_deduplicates_control_types(self):
+        """Same control type in multiple files is only reported once."""
+        inferrer = IntentInferrer()
+        ctx = _make_context(
+            files=[
+                FileContext(path="a.py", content="@login_required\ndef v1(): pass"),
+                FileContext(path="b.py", content="@login_required\ndef v2(): pass"),
+            ],
+        )
+        controls = inferrer._detect_security_controls(ctx)
+        auth_controls = [c for c in controls if c.control_type == "auth_decorator"]
+        assert len(auth_controls) == 1
+
+
+# ─── Trust Boundary Inference Tests ──────────────────────────────────────────
+
+
+class TestInferTrustBoundaries:
+    def test_database_boundary(self):
+        inferrer = IntentInferrer()
+        boundaries = inferrer._infer_trust_boundaries(["database_access"], [])
+        assert any(tb.name == "Database boundary" for tb in boundaries)
+
+
+# ─── Sensitive Path Detection Tests ──────────────────────────────────────────
+
+
+class TestDetectSensitivePaths:
+    def test_detects_payment_path(self):
+        inferrer = IntentInferrer()
+        ctx = _make_context(
+            files=[FileContext(path="payments/stripe.py")],
+        )
+        paths = inferrer._detect_sensitive_paths(ctx)
+        assert "payments/stripe.py" in paths
+
+    def test_ignores_safe_path(self):
+        inferrer = IntentInferrer()
+        ctx = _make_context(
+            files=[FileContext(path="lib/utils.py")],
+        )
+        paths = inferrer._detect_sensitive_paths(ctx)
+        assert paths == []
