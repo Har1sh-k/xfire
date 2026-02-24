@@ -33,6 +33,14 @@ def _parse_agents_list(agents: str | None) -> list[str] | None:
     return [a.strip() for a in agents.split(",") if a.strip()]
 
 
+def _handle_error(message: str, exc: Exception | None = None) -> None:
+    """Print a user-friendly error and exit."""
+    console.print(f"[red]Error:[/red] {message}")
+    if exc:
+        console.print(f"[dim]{type(exc).__name__}: {exc}[/dim]")
+    raise typer.Exit(1)
+
+
 @app.command()
 def analyze_pr(
     repo: str = typer.Option(..., help="GitHub repo in owner/repo format"),
@@ -50,14 +58,18 @@ def analyze_pr(
     """Analyze a GitHub pull request for security issues."""
     import asyncio
 
-    from crossfire.config.settings import load_settings
+    from crossfire.config.settings import ConfigError, load_settings
     from crossfire.core.orchestrator import CrossFireOrchestrator
 
     cli_overrides: dict = {}
     if context_depth:
         cli_overrides["analysis"] = {"context_depth": context_depth}
 
-    settings = load_settings(cli_overrides=cli_overrides)
+    try:
+        settings = load_settings(cli_overrides=cli_overrides)
+    except ConfigError as e:
+        _handle_error(str(e))
+        return  # unreachable, for type checker
 
     agent_list = _parse_agents_list(agents)
     if agent_list:
@@ -66,8 +78,8 @@ def analyze_pr(
                 settings.agents[name].enabled = False
 
     if not github_token:
-        console.print("[red]Error:[/red] GitHub token required. Set GITHUB_TOKEN or use --github-token.")
-        raise typer.Exit(1)
+        _handle_error("GitHub token required. Set GITHUB_TOKEN or use --github-token.")
+        return
 
     console.print(Panel(
         f"[bold]CrossFire Security Review[/bold]\n"
@@ -83,12 +95,16 @@ def analyze_pr(
         raise typer.Exit(0)
 
     orchestrator = CrossFireOrchestrator(settings)
-    report = asyncio.run(orchestrator.analyze_pr(
-        repo=repo,
-        pr_number=pr,
-        github_token=github_token,
-        skip_debate=skip_debate,
-    ))
+    try:
+        report = asyncio.run(orchestrator.analyze_pr(
+            repo=repo,
+            pr_number=pr,
+            github_token=github_token,
+            skip_debate=skip_debate,
+        ))
+    except Exception as e:
+        _handle_error(f"Analysis failed: {e}", e)
+        return
 
     _output_report(
         report, format, output, post_comment,
@@ -116,18 +132,22 @@ def analyze_diff(
     """Analyze a local diff or staged changes."""
     import asyncio
 
-    from crossfire.config.settings import load_settings
+    from crossfire.config.settings import ConfigError, load_settings
     from crossfire.core.orchestrator import CrossFireOrchestrator
 
     if not patch and not staged and not (base and head):
-        console.print("[red]Error:[/red] Must specify --patch, --staged, or --base/--head.")
-        raise typer.Exit(1)
+        _handle_error("Must specify --patch, --staged, or --base/--head.")
+        return
 
     cli_overrides: dict = {}
     if context_depth:
         cli_overrides["analysis"] = {"context_depth": context_depth}
 
-    settings = load_settings(repo_dir=repo_dir, cli_overrides=cli_overrides)
+    try:
+        settings = load_settings(repo_dir=repo_dir, cli_overrides=cli_overrides)
+    except ConfigError as e:
+        _handle_error(str(e))
+        return
 
     agent_list = _parse_agents_list(agents)
     if agent_list:
@@ -150,14 +170,21 @@ def analyze_diff(
         raise typer.Exit(0)
 
     orchestrator = CrossFireOrchestrator(settings)
-    report = asyncio.run(orchestrator.analyze_diff(
-        repo_dir=repo_dir,
-        patch_path=patch,
-        staged=staged,
-        base_ref=base,
-        head_ref=head,
-        skip_debate=skip_debate,
-    ))
+    try:
+        report = asyncio.run(orchestrator.analyze_diff(
+            repo_dir=repo_dir,
+            patch_path=patch,
+            staged=staged,
+            base_ref=base,
+            head_ref=head,
+            skip_debate=skip_debate,
+        ))
+    except FileNotFoundError as e:
+        _handle_error(str(e))
+        return
+    except Exception as e:
+        _handle_error(f"Analysis failed: {e}", e)
+        return
 
     _output_report(report, format, output, False)
 
@@ -175,11 +202,21 @@ def report(
 
     input_path = Path(input)
     if not input_path.exists():
-        console.print(f"[red]Error:[/red] Input file not found: {input}")
-        raise typer.Exit(1)
+        _handle_error(f"Input file not found: {input}")
+        return
 
-    data = json.loads(input_path.read_text())
-    cf_report = CrossFireReport(**data)
+    try:
+        data = json.loads(input_path.read_text())
+    except json.JSONDecodeError as e:
+        _handle_error(f"Invalid JSON in {input}: {e}")
+        return
+
+    try:
+        cf_report = CrossFireReport(**data)
+    except Exception as e:
+        _handle_error(f"Invalid report schema in {input}: {e}")
+        return
+
     _output_report(cf_report, format, output, False)
 
 
@@ -209,7 +246,7 @@ def config_check(
     repo_dir: str = typer.Option(".", help="Path to the repository root"),
 ) -> None:
     """Validate the CrossFire configuration."""
-    from crossfire.config.settings import load_settings
+    from crossfire.config.settings import ConfigError, load_settings
 
     try:
         settings = load_settings(repo_dir=repo_dir)
@@ -218,9 +255,8 @@ def config_check(
         console.print(f"  Context depth: {settings.analysis.context_depth}")
         console.print(f"  Debate: {settings.debate.role_assignment}")
         console.print(f"  Severity gate: fail on {settings.severity_gate.fail_on}+")
-    except Exception as e:
-        console.print(f"[red]Configuration error:[/red] {e}")
-        raise typer.Exit(1)
+    except (ConfigError, Exception) as e:
+        _handle_error(f"Configuration error: {e}")
 
 
 @app.command()
@@ -259,8 +295,8 @@ def demo(
     context_path = fixtures_dir / "context.json"
 
     if not diff_path.exists():
-        console.print(f"[red]Error:[/red] diff.patch not found in fixture {fixture}")
-        raise typer.Exit(1)
+        _handle_error(f"diff.patch not found in fixture {fixture}")
+        return
 
     diff_text = diff_path.read_text(errors="replace")
     files = parse_diff(diff_text)
@@ -279,9 +315,9 @@ def demo(
 
     settings = load_settings()
     orchestrator = CrossFireOrchestrator(settings)
-    report = asyncio.run(orchestrator._run_pipeline(pr_context, skip_debate=False))
+    report_result = asyncio.run(orchestrator._run_pipeline(pr_context, skip_debate=False))
 
-    _output_report(report, format, None, False)
+    _output_report(report_result, format, None, False)
 
 
 def _check_severity_gate(report: object, settings: object) -> None:
@@ -290,8 +326,10 @@ def _check_severity_gate(report: object, settings: object) -> None:
     from crossfire.core.models import CrossFireReport
     from crossfire.core.severity import should_fail_ci
 
-    assert isinstance(report, CrossFireReport)
-    assert isinstance(settings, CrossFireSettings)
+    if not isinstance(report, CrossFireReport):
+        raise TypeError(f"Expected CrossFireReport, got {type(report).__name__}")
+    if not isinstance(settings, CrossFireSettings):
+        raise TypeError(f"Expected CrossFireSettings, got {type(settings).__name__}")
 
     if should_fail_ci(
         findings=report.findings,
@@ -324,7 +362,8 @@ def _output_report(
     from crossfire.output.markdown_report import generate_markdown_report
     from crossfire.output.sarif_report import generate_sarif_report
 
-    assert isinstance(report, CrossFireReport)
+    if not isinstance(report, CrossFireReport):
+        raise TypeError(f"Expected CrossFireReport, got {type(report).__name__}")
 
     if fmt == "json":
         content = generate_json_report(report)
@@ -334,7 +373,9 @@ def _output_report(
         content = generate_markdown_report(report)
 
     if output_path:
-        Path(output_path).write_text(content)
+        out = Path(output_path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(content)
         console.print(f"[green]Report written to {output_path}[/green]")
     else:
         console.print(content)

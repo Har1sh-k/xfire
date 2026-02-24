@@ -559,11 +559,14 @@ class ContextBuilder:
 
     def build_from_patch_file(self, patch_path: str, repo_dir: str) -> PRContext:
         """Build PRContext from a .patch file."""
-        diff_text = Path(patch_path).read_text(errors="replace")
+        p = Path(patch_path)
+        if not p.exists():
+            raise FileNotFoundError(f"Patch file not found: {patch_path}")
+        diff_text = p.read_text(errors="replace")
         return self.build_from_diff(
             diff_text=diff_text,
             repo_dir=repo_dir,
-            pr_title=f"Patch analysis: {Path(patch_path).name}",
+            pr_title=f"Patch analysis: {p.name}",
         )
 
     async def build_from_github_pr(

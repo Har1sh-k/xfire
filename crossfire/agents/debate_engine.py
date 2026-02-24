@@ -300,16 +300,26 @@ class DebateEngine:
 
     def _assign_roles(self) -> tuple[str, str, str]:
         """Assign roles based on config (rotate or fixed)."""
+        enabled_agents = [name for name, cfg in self.settings.agents.items() if cfg.enabled]
+        if not enabled_agents:
+            raise AgentError("debate", "No agents are enabled for debate")
+
         if self.settings.debate.role_assignment == "fixed":
             roles = self.settings.debate.fixed_roles
-            return roles["prosecutor"], roles["defense"], roles["judge"]
+            # Validate that fixed roles reference available agents; fall back to rotation
+            if all(roles.get(r) in enabled_agents for r in ("prosecutor", "defense", "judge")):
+                return roles["prosecutor"], roles["defense"], roles["judge"]
+            logger.warning(
+                "debate.fixed_roles_unavailable",
+                roles=roles,
+                enabled=enabled_agents,
+                msg="Falling back to rotation",
+            )
 
         # Rotate roles
-        agents = [name for name, cfg in self.settings.agents.items() if cfg.enabled]
-        if len(agents) < 3:
-            # Pad with available agents
-            while len(agents) < 3:
-                agents.append(agents[0])
+        agents = list(enabled_agents)
+        while len(agents) < 3:
+            agents.append(agents[0])
 
         offset = self._rotation_index % len(agents)
         self._rotation_index += 1

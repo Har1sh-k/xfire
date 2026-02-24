@@ -120,10 +120,17 @@ def _find_config_file(repo_dir: str | None = None) -> Path | None:
     return None
 
 
+class ConfigError(Exception):
+    """Error loading or validating CrossFire configuration."""
+
+
 def _load_yaml_config(path: Path) -> dict:
     """Load and parse a YAML config file."""
-    with open(path) as f:
-        data = yaml.safe_load(f)
+    try:
+        with open(path) as f:
+            data = yaml.safe_load(f)
+    except yaml.YAMLError as e:
+        raise ConfigError(f"Invalid YAML in {path}: {e}") from e
     return data if isinstance(data, dict) else {}
 
 
@@ -172,14 +179,17 @@ def load_settings(
         merged = _deep_merge(merged, cli_overrides)
 
     # Parse into typed config
-    agents, debate, skills = _parse_agents_config(merged)
+    try:
+        agents, debate, skills = _parse_agents_config(merged)
 
-    return CrossFireSettings(
-        repo=RepoConfig(**merged.get("repo", {})),
-        analysis=AnalysisConfig(**merged.get("analysis", {})),
-        agents=agents,
-        debate=debate,
-        skills=skills,
-        severity_gate=SeverityGateConfig(**merged.get("severity_gate", {})),
-        suppressions=merged.get("suppressions", []),
-    )
+        return CrossFireSettings(
+            repo=RepoConfig(**merged.get("repo", {})),
+            analysis=AnalysisConfig(**merged.get("analysis", {})),
+            agents=agents,
+            debate=debate,
+            skills=skills,
+            severity_gate=SeverityGateConfig(**merged.get("severity_gate", {})),
+            suppressions=merged.get("suppressions", []),
+        )
+    except Exception as e:
+        raise ConfigError(f"Invalid configuration: {e}") from e

@@ -1,4 +1,4 @@
-"""GitHub PR loader — fetch PR data via GitHub API."""
+"""GitHub PR loader — fetch PR data via GitHub REST API."""
 
 from __future__ import annotations
 
@@ -10,16 +10,38 @@ from crossfire.core.models import PRContext
 logger = structlog.get_logger()
 
 
+class GitHubAPIError(Exception):
+    """Error from the GitHub API."""
+
+
+def _handle_github_error(resp: object, context: str) -> None:
+    """Raise a descriptive GitHubAPIError for failed responses."""
+    import httpx
+
+    if not isinstance(resp, httpx.Response):
+        return
+    if resp.is_success:
+        return
+    status = resp.status_code
+    if status == 404:
+        raise GitHubAPIError(f"{context}: not found (404). Check the repo/PR exists.")
+    elif status == 403:
+        raise GitHubAPIError(
+            f"{context}: permission denied or rate limited (403). Check your token."
+        )
+    elif status >= 500:
+        raise GitHubAPIError(f"{context}: GitHub server error ({status}). Try again later.")
+    else:
+        raise GitHubAPIError(f"{context}: HTTP {status} — {resp.text[:200]}")
+
+
 async def load_pr_context(
     repo: str,
     pr_number: int,
     token: str,
     config: AnalysisConfig,
 ) -> PRContext:
-    """Fetch complete PR context from GitHub API.
-
-    Uses httpx for async HTTP and PyGithub for convenience methods.
-    """
+    """Fetch complete PR context from GitHub REST API via httpx."""
     import httpx
 
     headers = {
@@ -30,7 +52,8 @@ async def load_pr_context(
     async with httpx.AsyncClient(headers=headers, timeout=30.0) as client:
         # Fetch PR metadata
         pr_resp = await client.get(f"https://api.github.com/repos/{repo}/pulls/{pr_number}")
-        pr_resp.raise_for_status()
+        if not pr_resp.is_success:
+            _handle_github_error(pr_resp, f"Fetching PR {repo}#{pr_number}")
         pr_data = pr_resp.json()
 
         # Fetch PR files (diff info)
@@ -38,7 +61,8 @@ async def load_pr_context(
             f"https://api.github.com/repos/{repo}/pulls/{pr_number}/files",
             params={"per_page": 100},
         )
-        files_resp.raise_for_status()
+        if not files_resp.is_success:
+            _handle_github_error(files_resp, f"Fetching files for {repo}#{pr_number}")
         files_data = files_resp.json()
 
         # Fetch the diff
@@ -46,7 +70,8 @@ async def load_pr_context(
             f"https://api.github.com/repos/{repo}/pulls/{pr_number}",
             headers={**headers, "Accept": "application/vnd.github.v3.diff"},
         )
-        diff_resp.raise_for_status()
+        if not diff_resp.is_success:
+            _handle_github_error(diff_resp, f"Fetching diff for {repo}#{pr_number}")
         diff_text = diff_resp.text
 
         # Parse diff into file contexts
