@@ -56,8 +56,8 @@ class TestPurposeAwareIntentInference:
 class TestPurposeAwareSynthesizer:
     """Test that the synthesizer respects purpose-aware assessments."""
 
-    def test_intended_capability_with_controls_reduced(self):
-        """Finding for intended capability with controls should be reduced."""
+    def test_intended_capability_with_controls_filtered_out(self):
+        """Finding for intended capability with controls should be dropped."""
         synth = FindingSynthesizer()
         finding = Finding(
             title="subprocess.run in executor",
@@ -74,7 +74,7 @@ class TestPurposeAwareSynthesizer:
         )
         review = AgentReview(agent_name="claude", findings=[finding])
         result = synth.synthesize([review], IntentProfile())
-        assert result[0].severity == Severity.MEDIUM  # reduced from Critical
+        assert len(result) == 0  # dropped entirely
 
     def test_unintended_capability_not_reduced(self):
         """Finding for unintended capability should NOT be reduced."""

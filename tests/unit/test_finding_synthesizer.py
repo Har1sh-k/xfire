@@ -141,7 +141,8 @@ class TestSynthesizer:
         result = synth.synthesize(reviews, IntentProfile())
         assert result[0].debate_tag == DebateTag.INFORMATIONAL
 
-    def test_purpose_aware_reduces_intended_capability(self):
+    def test_intended_capability_with_controls_filtered_out(self):
+        """Intended capabilities with isolation controls are dropped entirely."""
         synth = FindingSynthesizer()
         f = _make_finding(
             severity=Severity.CRITICAL,
@@ -152,7 +153,7 @@ class TestSynthesizer:
         )
         reviews = [_make_review("claude", [f])]
         result = synth.synthesize(reviews, IntentProfile())
-        assert result[0].severity == Severity.MEDIUM
+        assert len(result) == 0
 
     def test_sensitive_path_boosts_confidence(self):
         synth = FindingSynthesizer()

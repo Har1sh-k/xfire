@@ -10,12 +10,20 @@ from crossfire.core.models import (
     DebateTag,
     Evidence,
     Finding,
+    FindingCategory,
     FindingStatus,
     IntentProfile,
     Severity,
 )
 
 logger = structlog.get_logger()
+
+# Categories that represent architectural/design issues, not exploitable vulns
+_ARCHITECTURAL_CATEGORIES = frozenset({
+    FindingCategory.MISSING_RATE_LIMIT,
+    FindingCategory.ERROR_SWALLOWING,
+    FindingCategory.CONNECTION_LEAK,
+})
 
 # Severity ordering for comparisons
 SEVERITY_ORDER = {
@@ -146,6 +154,12 @@ class FindingSynthesizer:
 
         logger.info("synthesizer.start", total_findings=len(all_findings))
 
+        # 1b. Filter out architectural/design findings and intended capabilities
+        all_findings = self._filter_non_exploitable(all_findings, intent)
+        if not all_findings:
+            logger.info("synthesizer.all_filtered")
+            return []
+
         # 2. Cluster similar findings (union-find for transitive grouping)
         n = len(all_findings)
         parent = list(range(n))
@@ -209,6 +223,40 @@ class FindingSynthesizer:
         )
 
         return merged_findings
+
+    def _filter_non_exploitable(
+        self, findings: list[Finding], intent: IntentProfile,
+    ) -> list[Finding]:
+        """Drop findings that are architectural design flaws or intended capabilities.
+
+        Layer 2 of the two-layer filter (Layer 1 is the review prompt).
+        """
+        kept: list[Finding] = []
+        for finding in findings:
+            # Drop architectural categories
+            if finding.category in _ARCHITECTURAL_CATEGORIES:
+                logger.info(
+                    "synthesizer.filtered_architectural",
+                    title=finding.title,
+                    category=finding.category.value,
+                )
+                continue
+
+            # Drop intended capabilities with controls present
+            pa = finding.purpose_aware_assessment
+            if pa.is_intended_capability and pa.isolation_controls_present:
+                logger.info(
+                    "synthesizer.filtered_intended_capability",
+                    title=finding.title,
+                )
+                continue
+
+            kept.append(finding)
+
+        dropped = len(findings) - len(kept)
+        if dropped:
+            logger.info("synthesizer.filter_complete", dropped=dropped, kept=len(kept))
+        return kept
 
     def _apply_purpose_aware_adjustments(
         self, finding: Finding, intent: IntentProfile

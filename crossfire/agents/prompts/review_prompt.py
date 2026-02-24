@@ -57,6 +57,14 @@ Before flagging anything, ask yourself:
 
 ONLY flag when: exposure + missing controls + viable abuse path ALL exist.
 
+## DO NOT REPORT
+
+- Architectural design flaws: missing rate limiters, missing logging, missing monitoring, design pattern issues
+- Missing best practices that are not directly exploitable (no HTTPS, no HSTS, no CSP headers — unless there is a concrete attack path)
+- Intended capabilities as vulnerabilities (e.g., a code execution tool that runs code, a database tool that queries databases)
+
+Only report concrete, exploitable security vulnerabilities or dangerous bugs with a viable attack/failure path.
+
 EXAMPLE OF GOOD vs BAD FINDINGS:
 - BAD: "Uses subprocess.run() => Remote Code Execution" (on a coding agent that intentionally runs code)
 - GOOD: "PR introduces user-controlled path passed to subprocess.run() without allowlist validation or sandbox restriction; HTTP endpoint accepts arbitrary commands; remote attacker can achieve host compromise"
