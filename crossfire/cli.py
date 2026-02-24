@@ -90,7 +90,10 @@ def analyze_pr(
         skip_debate=skip_debate,
     ))
 
-    _output_report(report, format, output, post_comment)
+    _output_report(
+        report, format, output, post_comment,
+        repo=repo, pr_number=pr, github_token=github_token,
+    )
 
 
 @app.command()
@@ -277,8 +280,18 @@ def demo(
     _output_report(report, format, None, False)
 
 
-def _output_report(report: object, fmt: str, output_path: str | None, post_comment: bool) -> None:
+def _output_report(
+    report: object,
+    fmt: str,
+    output_path: str | None,
+    post_comment: bool,
+    repo: str | None = None,
+    pr_number: int | None = None,
+    github_token: str | None = None,
+) -> None:
     """Format and output the report."""
+    import asyncio
+
     from crossfire.core.models import CrossFireReport
     from crossfire.output.json_report import generate_json_report
     from crossfire.output.markdown_report import generate_markdown_report
@@ -298,6 +311,22 @@ def _output_report(report: object, fmt: str, output_path: str | None, post_comme
         console.print(f"[green]Report written to {output_path}[/green]")
     else:
         console.print(content)
+
+    if post_comment and repo and pr_number and github_token:
+        from crossfire.integrations.github.comment_poster import post_review_comment
+
+        # Always post markdown format as the PR comment
+        md_content = generate_markdown_report(report)
+        success = asyncio.run(post_review_comment(
+            repo=repo,
+            pr_number=pr_number,
+            token=github_token,
+            body=md_content,
+        ))
+        if success:
+            console.print(f"[green]Review comment posted to {repo}#{pr_number}[/green]")
+        else:
+            console.print(f"[red]Failed to post review comment to {repo}#{pr_number}[/red]")
 
 
 def _default_config_yaml() -> str:
