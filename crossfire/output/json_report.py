@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
+
 from crossfire.core.models import CrossFireReport
 
 
 def generate_json_report(report: CrossFireReport) -> str:
     """Generate a JSON report from a CrossFire analysis report."""
-    raise NotImplementedError("JSON report generation not yet implemented")
+    return report.model_dump_json(indent=2)
