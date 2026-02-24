@@ -199,9 +199,36 @@ class DependencyAnalysisSkill(BaseSkill):
     ) -> list[str]:
         """Check for inconsistencies between manifest and lockfile.
 
-        Placeholder — full implementation would parse both and compare.
+        Compares declared dependencies in the manifest against what is
+        recorded in the lockfile. Returns a list of inconsistency descriptions.
         """
-        return []
+        import os
+
+        issues: list[str] = []
+
+        manifest_full = os.path.join(repo_dir, manifest_path)
+        lockfile_full = os.path.join(repo_dir, lockfile_path)
+
+        if not os.path.isfile(manifest_full) or not os.path.isfile(lockfile_full):
+            return issues
+
+        try:
+            manifest_content = open(manifest_full, errors="replace").read()
+            lockfile_content = open(lockfile_full, errors="replace").read()
+        except OSError:
+            return issues
+
+        # Parse manifest deps
+        parser = self._get_parser(manifest_path)
+        manifest_deps = parser(manifest_content)
+
+        # Check each manifest dep against lockfile content
+        lockfile_lower = lockfile_content.lower()
+        for pkg in manifest_deps:
+            if pkg.lower() not in lockfile_lower:
+                issues.append(f"Package '{pkg}' declared in {manifest_path} but not found in {lockfile_path}")
+
+        return issues
 
     def _is_manifest(self, path: str) -> bool:
         """Check if a file path is a dependency manifest."""

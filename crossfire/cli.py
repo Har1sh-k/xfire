@@ -233,14 +233,48 @@ def demo(
         console.print(f"Available fixtures: {', '.join(available)}")
         raise typer.Exit(1)
 
+    import asyncio
+
+    from crossfire.config.settings import load_settings
+    from crossfire.core.context_builder import parse_diff
+    from crossfire.core.models import PRContext
+    from crossfire.core.orchestrator import CrossFireOrchestrator
+
     console.print(Panel(
         f"[bold]CrossFire Demo[/bold]\n"
         f"Fixture: {fixture}",
         title="🔥 CrossFire",
         border_style="red",
     ))
-    console.print(f"[yellow]Demo mode — analyzing fixture at {fixtures_dir}[/yellow]")
-    # Full demo pipeline will be wired up once the orchestrator is complete
+
+    # Load fixture data
+    diff_path = fixtures_dir / "diff.patch"
+    context_path = fixtures_dir / "context.json"
+
+    if not diff_path.exists():
+        console.print(f"[red]Error:[/red] diff.patch not found in fixture {fixture}")
+        raise typer.Exit(1)
+
+    diff_text = diff_path.read_text(errors="replace")
+    files = parse_diff(diff_text)
+
+    # Load context metadata
+    context_meta: dict = {}
+    if context_path.exists():
+        context_meta = json.loads(context_path.read_text())
+
+    pr_context = PRContext(
+        repo_name=context_meta.get("repo_name", f"fixture/{fixture}"),
+        pr_title=context_meta.get("pr_title", fixture.replace("_", " ").title()),
+        pr_description=context_meta.get("pr_description", ""),
+        files=files,
+    )
+
+    settings = load_settings()
+    orchestrator = CrossFireOrchestrator(settings)
+    report = asyncio.run(orchestrator._run_pipeline(pr_context, skip_debate=False))
+
+    _output_report(report, format, None, False)
 
 
 def _output_report(report: object, fmt: str, output_path: str | None, post_comment: bool) -> None:
