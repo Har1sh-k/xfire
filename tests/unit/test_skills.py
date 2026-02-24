@@ -1,6 +1,7 @@
 """Tests for CrossFire skills."""
 
 import os
+import subprocess
 import tempfile
 from pathlib import Path
 
@@ -9,9 +10,11 @@ from crossfire.skills.config_analysis import ConfigAnalysisSkill
 from crossfire.skills.data_flow_tracing import DataFlowTracingSkill
 from crossfire.skills.dependency_analysis import (
     DependencyAnalysisSkill,
+    _parse_pyproject_deps,
     _parse_requirements_txt,
     _parse_package_json_deps,
 )
+from crossfire.skills.git_archeology import GitArcheologySkill
 from crossfire.skills.test_coverage_check import TestCoverageCheckSkill
 
 
@@ -230,3 +233,110 @@ class TestTestCoverageCheck:
 
         assert "app.py" in gaps.files_without_tests
         assert "config.yaml" not in gaps.files_without_tests  # non-code files skipped
+
+
+# ─── Git Archeology Tests ────────────────────────────────────────────────────
+
+
+def _init_git_repo(path):
+    """Helper: create a git repo with one committed file."""
+    subprocess.run(["git", "init"], cwd=str(path), capture_output=True)
+    subprocess.run(["git", "config", "user.email", "t@t.com"], cwd=str(path), capture_output=True)
+    subprocess.run(["git", "config", "user.name", "T"], cwd=str(path), capture_output=True)
+    (path / "app.py").write_text("def hello():\n    pass\n")
+    subprocess.run(["git", "add", "."], cwd=str(path), capture_output=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=str(path), capture_output=True)
+
+
+class TestGitArcheology:
+    def test_execute(self, tmp_path):
+        _init_git_repo(tmp_path)
+        skill = GitArcheologySkill()
+        result = skill.execute(str(tmp_path), ["app.py"])
+        assert result.skill_name == "git_archeology"
+        assert "1 files" in result.summary
+        assert "blame" in result.details
+
+    def test_get_blame(self, tmp_path):
+        _init_git_repo(tmp_path)
+        skill = GitArcheologySkill()
+        blame = skill.get_blame("app.py", str(tmp_path))
+        assert blame is not None
+        assert blame.total_lines > 0
+        assert "T" in blame.authors
+
+    def test_get_file_history(self, tmp_path):
+        _init_git_repo(tmp_path)
+        skill = GitArcheologySkill()
+        history = skill.get_file_history("app.py", str(tmp_path))
+        assert len(history) >= 1
+        assert history[0].message == "init"
+
+
+# ─── Code Navigation Execute Test ───────────────────────────────────────────
+
+
+class TestCodeNavigationExecute:
+    def test_execute_returns_skill_result(self, tmp_path):
+        (tmp_path / "app.py").write_text("from utils import helper\ndef main(): pass\n")
+        (tmp_path / "utils.py").write_text("def helper(): pass\n")
+        # Need a git repo for find_callers_of_file (uses git grep)
+        _init_git_repo(tmp_path)
+        # Overwrite with our test files
+        (tmp_path / "app.py").write_text("from utils import helper\ndef main(): pass\n")
+        (tmp_path / "utils.py").write_text("def helper(): pass\n")
+        subprocess.run(["git", "add", "."], cwd=str(tmp_path), capture_output=True)
+        subprocess.run(["git", "commit", "-m", "add files"], cwd=str(tmp_path), capture_output=True)
+
+        skill = CodeNavigationSkill()
+        result = skill.execute(str(tmp_path), ["app.py"])
+        assert result.skill_name == "code_navigation"
+        assert "1 files" in result.summary
+        assert "imports" in result.details
+
+
+# ─── Config Analysis Permissions Test ────────────────────────────────────────
+
+
+class TestConfigAnalysisPermissions:
+    def test_detects_wildcard_cors(self, tmp_path):
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+        (src_dir / "server.py").write_text(
+            "from flask_cors import CORS\n"
+            "CORS(app, origins='*')\n"
+        )
+        skill = ConfigAnalysisSkill()
+        issues = skill.analyze_permissions(str(tmp_path))
+        assert len(issues) >= 1
+        assert issues[0].issue_type == "permissive_cors"
+
+
+# ─── Dependency Pyproject Parser Test ────────────────────────────────────────
+
+
+class TestDependencyPyproject:
+    def test_parse_pyproject_deps(self):
+        content = (
+            "[project]\n"
+            "name = \"myapp\"\n"
+            "dependencies = [\n"
+            '  "flask>=3.0",\n'
+            '  "httpx",\n'
+            "]\n"
+        )
+        deps = _parse_pyproject_deps(content)
+        assert "flask" in deps
+        assert "httpx" in deps
+
+
+# ─── Test Coverage Execute Test ──────────────────────────────────────────────
+
+
+class TestTestCoverageExecute:
+    def test_execute_returns_skill_result(self, tmp_path):
+        (tmp_path / "app.py").write_text("def hello(): pass\n")
+        skill = TestCoverageCheckSkill()
+        result = skill.execute(str(tmp_path), ["app.py"])
+        assert result.skill_name == "test_coverage_check"
+        assert "app.py" in result.details["files_without_tests"]

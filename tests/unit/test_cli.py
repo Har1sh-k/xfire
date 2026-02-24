@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import typer
+from typer.testing import CliRunner
 
 from crossfire.cli import (
     _check_severity_gate,
@@ -11,6 +12,7 @@ from crossfire.cli import (
     _handle_error,
     _output_report,
     _parse_agents_list,
+    app,
 )
 from crossfire.config.settings import CrossFireSettings, SeverityGateConfig
 from crossfire.core.models import (
@@ -130,3 +132,37 @@ class TestDefaultConfigYaml:
         assert "repo:" in yaml_text
         assert "agents:" in yaml_text
         assert "severity_gate:" in yaml_text
+
+
+# ─── CLI Command Tests ──────────────────────────────────────────────────────
+
+runner = CliRunner()
+
+
+class TestCliInit:
+    def test_creates_config(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        result = runner.invoke(app, ["init"])
+        assert result.exit_code == 0
+        config_file = tmp_path / ".crossfire" / "config.yaml"
+        assert config_file.exists()
+        assert "agents:" in config_file.read_text()
+
+    def test_existing_config_noop(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        config_dir = tmp_path / ".crossfire"
+        config_dir.mkdir()
+        (config_dir / "config.yaml").write_text("existing: true\n")
+        result = runner.invoke(app, ["init"])
+        assert result.exit_code == 0
+        assert "already exists" in result.stdout
+        # Should not overwrite
+        assert (config_dir / "config.yaml").read_text() == "existing: true\n"
+
+
+class TestCliConfigCheck:
+    def test_valid_config(self):
+        """config-check with default settings (no config file) should succeed."""
+        result = runner.invoke(app, ["config-check"])
+        assert result.exit_code == 0
+        assert "valid" in result.stdout.lower()
