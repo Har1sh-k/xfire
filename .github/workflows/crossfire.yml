@@ -16,12 +16,23 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+
+      - name: Restore CrossFire cache
+        uses: actions/cache@v4
+        with:
+          path: .crossfire/cache
+          key: crossfire-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+          restore-keys: |
+            crossfire-${{ github.event.pull_request.number }}-
+            crossfire-
+
       - run: pip install crossfire
       - run: |
           crossfire analyze-pr \
             --repo ${{ github.repository }} \
             --pr ${{ github.event.pull_request.number }} \
             --github-token ${{ secrets.GITHUB_TOKEN }} \
+            --cache-dir .crossfire/cache \
             --format markdown \
             --post-comment
         env:
