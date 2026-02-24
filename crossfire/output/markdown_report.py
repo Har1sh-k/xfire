@@ -10,20 +10,6 @@ from crossfire.core.models import (
     Severity,
 )
 
-SEVERITY_EMOJI = {
-    Severity.CRITICAL: "🚨",
-    Severity.HIGH: "🔴",
-    Severity.MEDIUM: "🟡",
-    Severity.LOW: "🔵",
-}
-
-STATUS_EMOJI = {
-    FindingStatus.CONFIRMED: "🚨",
-    FindingStatus.LIKELY: "⚠️",
-    FindingStatus.UNCLEAR: "🔍",
-    FindingStatus.REJECTED: "✅",
-}
-
 
 def generate_markdown_report(report: CrossFireReport) -> str:
     """Generate a markdown report from a CrossFire analysis report."""

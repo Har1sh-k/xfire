@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 import shutil
 from pathlib import Path
-from typing import Optional
+from typing import NoReturn
 
 import typer
 from rich.console import Console
@@ -33,7 +33,7 @@ def _parse_agents_list(agents: str | None) -> list[str] | None:
     return [a.strip() for a in agents.split(",") if a.strip()]
 
 
-def _handle_error(message: str, exc: Exception | None = None) -> None:
+def _handle_error(message: str, exc: Exception | None = None) -> NoReturn:
     """Print a user-friendly error and exit."""
     console.print(f"[red]Error:[/red] {message}")
     if exc:
@@ -45,11 +45,11 @@ def _handle_error(message: str, exc: Exception | None = None) -> None:
 def analyze_pr(
     repo: str = typer.Option(..., help="GitHub repo in owner/repo format"),
     pr: int = typer.Option(..., help="PR number"),
-    github_token: Optional[str] = typer.Option(None, envvar="GITHUB_TOKEN", help="GitHub token"),
-    agents: Optional[str] = typer.Option(None, help="Comma-separated agent list (claude,codex,gemini)"),
+    github_token: str | None = typer.Option(None, envvar="GITHUB_TOKEN", help="GitHub token"),
+    agents: str | None = typer.Option(None, help="Comma-separated agent list (claude,codex,gemini)"),
     skip_debate: bool = typer.Option(False, help="Skip adversarial debate phase"),
-    context_depth: Optional[str] = typer.Option(None, help="Context depth: shallow|medium|deep"),
-    output: Optional[str] = typer.Option(None, help="Output file path"),
+    context_depth: str | None = typer.Option(None, help="Context depth: shallow|medium|deep"),
+    output: str | None = typer.Option(None, help="Output file path"),
     format: str = typer.Option("markdown", help="Output format: markdown|json|sarif"),
     post_comment: bool = typer.Option(False, help="Post review as GitHub PR comment"),
     verbose: bool = typer.Option(False, help="Enable verbose logging"),
@@ -69,7 +69,6 @@ def analyze_pr(
         settings = load_settings(cli_overrides=cli_overrides)
     except ConfigError as e:
         _handle_error(str(e))
-        return  # unreachable, for type checker
 
     agent_list = _parse_agents_list(agents)
     if agent_list:
@@ -79,7 +78,6 @@ def analyze_pr(
 
     if not github_token:
         _handle_error("GitHub token required. Set GITHUB_TOKEN or use --github-token.")
-        return
 
     console.print(Panel(
         f"[bold]CrossFire Security Review[/bold]\n"
@@ -104,7 +102,6 @@ def analyze_pr(
         ))
     except Exception as e:
         _handle_error(f"Analysis failed: {e}", e)
-        return
 
     _output_report(
         report, format, output, post_comment,
@@ -116,15 +113,15 @@ def analyze_pr(
 
 @app.command()
 def analyze_diff(
-    patch: Optional[str] = typer.Option(None, help="Path to a diff/patch file"),
+    patch: str | None = typer.Option(None, help="Path to a diff/patch file"),
     repo_dir: str = typer.Option(".", help="Path to the repository root"),
     staged: bool = typer.Option(False, help="Analyze staged changes in the repo"),
-    base: Optional[str] = typer.Option(None, help="Base branch/commit for comparison"),
-    head: Optional[str] = typer.Option(None, help="Head branch/commit for comparison"),
-    agents: Optional[str] = typer.Option(None, help="Comma-separated agent list"),
+    base: str | None = typer.Option(None, help="Base branch/commit for comparison"),
+    head: str | None = typer.Option(None, help="Head branch/commit for comparison"),
+    agents: str | None = typer.Option(None, help="Comma-separated agent list"),
     skip_debate: bool = typer.Option(False, help="Skip adversarial debate phase"),
-    context_depth: Optional[str] = typer.Option(None, help="Context depth: shallow|medium|deep"),
-    output: Optional[str] = typer.Option(None, help="Output file path"),
+    context_depth: str | None = typer.Option(None, help="Context depth: shallow|medium|deep"),
+    output: str | None = typer.Option(None, help="Output file path"),
     format: str = typer.Option("markdown", help="Output format: markdown|json|sarif"),
     verbose: bool = typer.Option(False, help="Enable verbose logging"),
     dry_run: bool = typer.Option(False, help="Show what would be analyzed without calling agents"),
@@ -137,7 +134,6 @@ def analyze_diff(
 
     if not patch and not staged and not (base and head):
         _handle_error("Must specify --patch, --staged, or --base/--head.")
-        return
 
     cli_overrides: dict = {}
     if context_depth:
@@ -147,7 +143,6 @@ def analyze_diff(
         settings = load_settings(repo_dir=repo_dir, cli_overrides=cli_overrides)
     except ConfigError as e:
         _handle_error(str(e))
-        return
 
     agent_list = _parse_agents_list(agents)
     if agent_list:
@@ -181,10 +176,8 @@ def analyze_diff(
         ))
     except FileNotFoundError as e:
         _handle_error(str(e))
-        return
     except Exception as e:
         _handle_error(f"Analysis failed: {e}", e)
-        return
 
     _output_report(report, format, output, False)
 
@@ -195,7 +188,7 @@ def analyze_diff(
 def report(
     input: str = typer.Option(..., help="Path to a CrossFire JSON results file"),
     format: str = typer.Option("markdown", help="Output format: markdown|json|sarif"),
-    output: Optional[str] = typer.Option(None, help="Output file path"),
+    output: str | None = typer.Option(None, help="Output file path"),
 ) -> None:
     """Generate a report from existing analysis results."""
     from crossfire.core.models import CrossFireReport
@@ -203,19 +196,16 @@ def report(
     input_path = Path(input)
     if not input_path.exists():
         _handle_error(f"Input file not found: {input}")
-        return
 
     try:
         data = json.loads(input_path.read_text())
     except json.JSONDecodeError as e:
         _handle_error(f"Invalid JSON in {input}: {e}")
-        return
 
     try:
         cf_report = CrossFireReport(**data)
     except Exception as e:
         _handle_error(f"Invalid report schema in {input}: {e}")
-        return
 
     _output_report(cf_report, format, output, False)
 
@@ -296,7 +286,6 @@ def demo(
 
     if not diff_path.exists():
         _handle_error(f"diff.patch not found in fixture {fixture}")
-        return
 
     diff_text = diff_path.read_text(errors="replace")
     files = parse_diff(diff_text)
