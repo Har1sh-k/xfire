@@ -40,8 +40,11 @@ logger = structlog.get_logger()
 class CrossFireOrchestrator:
     """Orchestrates the full CrossFire analysis pipeline."""
 
-    def __init__(self, settings: CrossFireSettings) -> None:
+    def __init__(
+        self, settings: CrossFireSettings, cache_dir: str | None = None,
+    ) -> None:
         self.settings = settings
+        self.cache_dir = cache_dir
         self.context_builder = ContextBuilder(settings.analysis)
         self.intent_inferrer = IntentInferrer(settings.repo)
         self.review_engine = ReviewEngine(settings)
@@ -57,15 +60,34 @@ class CrossFireOrchestrator:
         skip_debate: bool = False,
     ) -> CrossFireReport:
         """Analyze a GitHub PR through the full pipeline."""
+        from crossfire.core.cache import (
+            load_cached_context,
+            save_context_cache,
+        )
+
         start_time = time.monotonic()
 
-        # 1. Build context
-        logger.info("pipeline.context_building", repo=repo, pr=pr_number)
-        context = await self.context_builder.build_from_github_pr(
-            repo=repo,
-            pr_number=pr_number,
-            github_token=github_token,
-        )
+        # 1. Try loading context from cache (keyed on head SHA)
+        context = None
+        if self.cache_dir:
+            from crossfire.integrations.github.pr_loader import fetch_pr_shas
+
+            head_sha, base_sha = await fetch_pr_shas(repo, pr_number, github_token)
+            if head_sha:
+                context = load_cached_context(self.cache_dir, pr_number, head_sha)
+
+        # 2. Build context from GitHub API on cache miss
+        if context is None:
+            logger.info("pipeline.context_building", repo=repo, pr=pr_number)
+            context = await self.context_builder.build_from_github_pr(
+                repo=repo,
+                pr_number=pr_number,
+                github_token=github_token,
+            )
+            if self.cache_dir and context.head_sha:
+                save_context_cache(
+                    self.cache_dir, pr_number, context.head_sha, context,
+                )
 
         # Run the common pipeline
         report = await self._run_pipeline(context, skip_debate)
@@ -110,6 +132,10 @@ class CrossFireOrchestrator:
         repo_dir: str | None = None,
     ) -> CrossFireReport:
         """Run the common analysis pipeline on a PRContext."""
+        from crossfire.core.cache import (
+            load_cached_intent,
+            save_intent_cache,
+        )
 
         logger.info(
             "pipeline.context_ready",
@@ -117,9 +143,17 @@ class CrossFireOrchestrator:
             repo=context.repo_name,
         )
 
-        # 2. Infer intent
-        logger.info("pipeline.intent_inference")
-        intent = self.intent_inferrer.infer(context)
+        # 2. Try loading intent from cache (keyed on base SHA)
+        intent = None
+        if self.cache_dir and context.base_sha:
+            intent = load_cached_intent(self.cache_dir, context.base_sha)
+
+        if intent is None:
+            logger.info("pipeline.intent_inference")
+            intent = self.intent_inferrer.infer(context)
+            if self.cache_dir and context.base_sha:
+                save_intent_cache(self.cache_dir, context.base_sha, intent)
+
         logger.info(
             "pipeline.intent_ready",
             purpose=intent.repo_purpose[:100],

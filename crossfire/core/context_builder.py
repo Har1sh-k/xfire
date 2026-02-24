@@ -521,11 +521,17 @@ class ContextBuilder:
         commit_messages = self._get_commit_messages(repo_dir, base_ref)
         repo_name = self._detect_repo_name(repo_dir)
 
+        # Resolve SHAs for cache keying
+        head_sha = _run_git(["rev-parse", "HEAD"], repo_dir) or ""
+        base_sha = _run_git(["rev-parse", base_ref], repo_dir) or ""
+
         return PRContext(
             repo_name=repo_name,
             pr_title=pr_title,
             pr_description=pr_description,
             base_branch=base_ref,
+            head_sha=head_sha.strip(),
+            base_sha=base_sha.strip(),
             files=files,
             commit_messages=commit_messages,
             readme_content=readme,

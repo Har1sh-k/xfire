@@ -52,6 +52,10 @@ def analyze_pr(
     output: str | None = typer.Option(None, help="Output file path"),
     format: str = typer.Option("markdown", help="Output format: markdown|json|sarif"),
     post_comment: bool = typer.Option(False, help="Post review as GitHub PR comment"),
+    cache_dir: str | None = typer.Option(
+        None, envvar="CROSSFIRE_CACHE_DIR",
+        help="Cache directory for context/intent persistence across runs",
+    ),
     verbose: bool = typer.Option(False, help="Enable verbose logging"),
     dry_run: bool = typer.Option(False, help="Show what would be analyzed without calling agents"),
 ) -> None:
@@ -92,7 +96,7 @@ def analyze_pr(
         console.print("[yellow]Dry run mode — would analyze the above, exiting.[/yellow]")
         raise typer.Exit(0)
 
-    orchestrator = CrossFireOrchestrator(settings)
+    orchestrator = CrossFireOrchestrator(settings, cache_dir=cache_dir)
     try:
         report = asyncio.run(orchestrator.analyze_pr(
             repo=repo,
@@ -123,6 +127,10 @@ def analyze_diff(
     context_depth: str | None = typer.Option(None, help="Context depth: shallow|medium|deep"),
     output: str | None = typer.Option(None, help="Output file path"),
     format: str = typer.Option("markdown", help="Output format: markdown|json|sarif"),
+    cache_dir: str | None = typer.Option(
+        None, envvar="CROSSFIRE_CACHE_DIR",
+        help="Cache directory for context/intent persistence across runs",
+    ),
     verbose: bool = typer.Option(False, help="Enable verbose logging"),
     dry_run: bool = typer.Option(False, help="Show what would be analyzed without calling agents"),
 ) -> None:
@@ -164,7 +172,7 @@ def analyze_diff(
         console.print("[yellow]Dry run mode — would analyze the above, exiting.[/yellow]")
         raise typer.Exit(0)
 
-    orchestrator = CrossFireOrchestrator(settings)
+    orchestrator = CrossFireOrchestrator(settings, cache_dir=cache_dir)
     try:
         report = asyncio.run(orchestrator.analyze_diff(
             repo_dir=repo_dir,

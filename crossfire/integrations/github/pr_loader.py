@@ -91,6 +91,32 @@ async def _fetch_all_pr_files(client: object, repo: str, pr_number: int) -> list
     return all_files
 
 
+async def fetch_pr_shas(
+    repo: str,
+    pr_number: int,
+    token: str,
+) -> tuple[str, str]:
+    """Lightweight fetch of just the head and base SHAs for a PR.
+
+    Returns (head_sha, base_sha).  Costs a single API call.
+    """
+    import httpx
+
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github.v3+json",
+    }
+    async with httpx.AsyncClient(headers=headers, timeout=15.0) as client:
+        resp = await client.get(
+            f"https://api.github.com/repos/{repo}/pulls/{pr_number}",
+        )
+        _handle_github_error(resp, f"Fetching SHAs for {repo}#{pr_number}")
+        data = resp.json()
+        head_sha = data.get("head", {}).get("sha", "")
+        base_sha = data.get("base", {}).get("sha", "")
+        return head_sha, base_sha
+
+
 async def load_pr_context(
     repo: str,
     pr_number: int,
@@ -223,6 +249,8 @@ async def load_pr_context(
             author=pr_data.get("user", {}).get("login", ""),
             base_branch=pr_data.get("base", {}).get("ref", "main"),
             head_branch=pr_data.get("head", {}).get("ref", ""),
+            head_sha=head_ref,
+            base_sha=base_ref,
             files=files,
             commit_messages=commit_messages,
             labels=labels,
