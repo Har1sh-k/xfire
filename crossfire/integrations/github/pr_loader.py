@@ -69,9 +69,10 @@ async def load_pr_context(
                     fc.content = content_resp.text
 
             if not fc.is_new and config.context_depth != "shallow":
-                # Fetch base version
+                # Fetch base version (use old_path for renames since base lives at the old path)
+                base_fetch_path = fc.old_path if fc.is_renamed and fc.old_path else fc.path
                 base_resp = await client.get(
-                    f"https://api.github.com/repos/{repo}/contents/{fc.path}",
+                    f"https://api.github.com/repos/{repo}/contents/{base_fetch_path}",
                     params={"ref": base_ref},
                     headers={**headers, "Accept": "application/vnd.github.v3.raw"},
                 )

@@ -594,9 +594,10 @@ class ContextBuilder:
         if not fc.is_deleted:
             fc.content = _read_file_safe(full_path)
 
-        # Base content
+        # Base content (use old_path for renames, since the base version lives at the old path)
         if not fc.is_new:
-            fc.base_content = _get_file_at_ref(fc.path, base_ref, repo_dir)
+            base_path = fc.old_path if fc.is_renamed and fc.old_path else fc.path
+            fc.base_content = _get_file_at_ref(base_path, base_ref, repo_dir)
 
         depth = self.config.context_depth
 
