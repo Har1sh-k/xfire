@@ -14,7 +14,10 @@ from crossfire.agents.prompts.defense_prompt import (
     build_defense_prompt,
 )
 from crossfire.agents.prompts.judge_prompt import (
+    JUDGE_CLARIFICATION_SYSTEM_PROMPT,
     JUDGE_SYSTEM_PROMPT,
+    build_judge_clarification_prompt,
+    build_judge_final_prompt,
     build_judge_prompt,
 )
 from crossfire.agents.prompts.prosecutor_prompt import (
@@ -182,10 +185,9 @@ class DebateEngine:
                 if debate:
                     self._apply_debate_result(finding, debate)
                     results.append((finding, debate))
-                    # Deduct from budget: 2 if rebuttal happened, else 1
+                    # Deduct rounds used from budget
                     if remaining_budget is not None:
-                        cost = 2 if debate.rebuttal else 1
-                        remaining_budget -= cost
+                        remaining_budget -= debate.rounds_used
                 else:
                     finding.status = FindingStatus.UNCLEAR
                     finding.debate_summary = "Debate could not be completed"
@@ -201,9 +203,19 @@ class DebateEngine:
         context: PRContext,
         intent: IntentProfile,
     ) -> DebateRecord | None:
-        """Run a single debate for one finding."""
+        """Run a single structured debate for one finding.
+
+        Flow:
+        - Round 1: Prosecutor argues → Defense responds
+        - If defense concedes → Judge issues verdict (1 round)
+        - If defense disagrees → Round 2: Judge asks targeted questions,
+          both sides respond, judge makes final ruling (2 rounds)
+        - 2-agent mode (no judge): defense concedes → Confirmed,
+          defense disagrees → Unclear
+        """
         # Assign roles (evidence-driven: finder prosecutes, misser defends)
         prosecutor_name, defense_name, judge_name = self._assign_roles(finding)
+        has_judge = prosecutor_name != defense_name and judge_name != defense_name
 
         logger.info(
             "debate.start",
@@ -211,11 +223,12 @@ class DebateEngine:
             prosecutor=prosecutor_name,
             defense=defense_name,
             judge=judge_name,
+            has_judge=has_judge,
         )
 
         # Create agent instances
         agents: dict[str, BaseAgent] = {}
-        for name in (prosecutor_name, defense_name, judge_name):
+        for name in {prosecutor_name, defense_name, judge_name}:
             config = self.settings.agents.get(name)
             if not config or not config.enabled:
                 logger.warning("debate.agent_unavailable", agent=name)
@@ -241,7 +254,7 @@ class DebateEngine:
         context_summary = _format_context_summary(context)
         intent_summary = _format_intent_summary(intent)
 
-        # Step 1: Prosecution
+        # ── Round 1: Prosecution ──
         prosecutor_argument = await self._run_prosecution(
             agents.get(prosecutor_name),
             prosecutor_name,
@@ -251,7 +264,7 @@ class DebateEngine:
             intent_summary,
         )
 
-        # Step 2: Defense
+        # ── Round 1: Defense ──
         defense_argument = await self._run_defense(
             agents.get(defense_name),
             defense_name,
@@ -262,36 +275,115 @@ class DebateEngine:
             intent_summary,
         )
 
-        # Step 3: Rebuttal (optional)
-        rebuttal_argument = None
-        if self.settings.debate.enable_rebuttal and agents.get(prosecutor_name):
-            rebuttal_argument = await self._run_rebuttal(
-                agents[prosecutor_name],
-                prosecutor_name,
-                finding_summary,
-                defense_argument.argument if defense_argument else "",
-            )
-
-        # Step 4: Judge
-        judge_argument, judge_raw_response = await self._run_judge(
-            agents.get(judge_name),
-            judge_name,
-            finding_summary,
-            prosecutor_argument.argument if prosecutor_argument else "",
-            defense_argument.argument if defense_argument else "",
-            rebuttal_argument.argument if rebuttal_argument else None,
-            intent_summary,
-        )
-
-        # Build debate record
-        if not prosecutor_argument or not defense_argument or not judge_argument:
+        if not prosecutor_argument or not defense_argument:
             return None
 
-        # Parse severity from judge's raw response (not the extracted argument text)
+        # ── Check: does defense concede? ──
+        defense_concedes = self._defense_concedes(defense_argument)
+        rounds_used = 1
+        judge_questions_text: str | None = None
+        round_2_prosecution: AgentArgument | None = None
+        round_2_defense: AgentArgument | None = None
+
+        # ── 2-agent mode (no real judge) ──
+        if not has_judge:
+            judge_argument = AgentArgument(
+                agent_name="none",
+                role="judge",
+                position="confirmed" if defense_concedes else "unclear",
+                argument=(
+                    "Defense conceded; finding confirmed."
+                    if defense_concedes
+                    else "No judge available and defense disagrees; marking unclear for human review."
+                ),
+                confidence=defense_argument.confidence if defense_concedes else 0.3,
+            )
+            debate = DebateRecord(
+                finding_id=finding.id,
+                prosecutor_argument=prosecutor_argument,
+                defense_argument=defense_argument,
+                judge_ruling=judge_argument,
+                rounds_used=1,
+                final_severity=finding.severity,
+                final_confidence=judge_argument.confidence,
+            )
+            compute_consensus(debate, intent)
+            logger.info(
+                "debate.complete_2agent",
+                finding=finding.title,
+                defense_concedes=defense_concedes,
+                consensus=debate.consensus.value,
+            )
+            return debate
+
+        # ── 3-agent mode: defense concedes → judge verdicts immediately ──
+        if defense_concedes:
+            logger.info("debate.defense_concedes", finding=finding.title)
+            judge_argument, judge_raw = await self._run_judge(
+                agents.get(judge_name),
+                judge_name,
+                finding_summary,
+                prosecutor_argument.argument,
+                defense_argument.argument,
+                None,
+                intent_summary,
+            )
+        else:
+            # ── Round 2: Judge-led clarification ──
+            logger.info("debate.round2_start", finding=finding.title)
+            rounds_used = 2
+
+            judge_questions_text = await self._run_judge_clarification(
+                agents.get(judge_name),
+                judge_name,
+                finding_summary,
+                prosecutor_argument.argument,
+                defense_argument.argument,
+                intent_summary,
+            )
+
+            # Both sides respond to judge's questions (parallel)
+            import asyncio
+
+            r2_pros_task = self._run_round2_response(
+                agents.get(prosecutor_name),
+                prosecutor_name,
+                "prosecutor",
+                finding_summary,
+                judge_questions_text or "",
+            )
+            r2_def_task = self._run_round2_response(
+                agents.get(defense_name),
+                defense_name,
+                "defense",
+                finding_summary,
+                judge_questions_text or "",
+            )
+            round_2_prosecution, round_2_defense = await asyncio.gather(
+                r2_pros_task, r2_def_task,
+            )
+
+            # Judge makes final ruling with all context
+            judge_argument, judge_raw = await self._run_judge_final(
+                agents.get(judge_name),
+                judge_name,
+                finding_summary,
+                prosecutor_argument.argument,
+                defense_argument.argument,
+                judge_questions_text or "",
+                round_2_prosecution.argument if round_2_prosecution else "",
+                round_2_defense.argument if round_2_defense else "",
+                intent_summary,
+            )
+
+        if not judge_argument:
+            return None
+
+        # Parse severity from judge's raw response
         final_severity = finding.severity
-        if judge_raw_response and judge_name in agents:
+        if judge_raw and judge_name in agents:
             try:
-                parsed_judge = agents[judge_name].parse_json_response(judge_raw_response)
+                parsed_judge = agents[judge_name].parse_json_response(judge_raw)
                 if isinstance(parsed_judge, dict):
                     sev_str = parsed_judge.get("final_severity", finding.severity.value)
                     final_severity = Severity(sev_str)
@@ -303,7 +395,10 @@ class DebateEngine:
             prosecutor_argument=prosecutor_argument,
             defense_argument=defense_argument,
             judge_ruling=judge_argument,
-            rebuttal=rebuttal_argument,
+            judge_questions=judge_questions_text,
+            round_2_prosecution=round_2_prosecution,
+            round_2_defense=round_2_defense,
+            rounds_used=rounds_used,
             final_severity=final_severity,
             final_confidence=judge_argument.confidence,
         )
@@ -314,10 +409,17 @@ class DebateEngine:
         logger.info(
             "debate.complete",
             finding=finding.title,
+            rounds=rounds_used,
             consensus=debate.consensus.value,
         )
 
         return debate
+
+    @staticmethod
+    def _defense_concedes(defense_argument: AgentArgument) -> bool:
+        """Check if the defense conceded (agrees the finding is real)."""
+        concede_positions = {"real_issue", "confirmed", "agree", "concede"}
+        return defense_argument.position.lower().strip() in concede_positions
 
     def _assign_roles(
         self, finding: Finding | None = None,
@@ -468,27 +570,91 @@ class DebateEngine:
             logger.error("debate.defense_failed", error=str(e))
             return None
 
-    async def _run_rebuttal(
+    async def _run_judge_clarification(
         self,
-        agent: BaseAgent,
+        agent: BaseAgent | None,
         agent_name: str,
         finding_summary: str,
+        prosecutor_argument: str,
         defense_argument: str,
-    ) -> AgentArgument | None:
-        """Run the rebuttal phase (prosecutor responds to defense)."""
-        prompt = (
-            f"## Finding Under Review\n\n{finding_summary}\n\n"
-            f"## Defense's Argument\n\n{defense_argument}\n\n"
-            "Respond to the defense's specific claims. Address their strongest points. "
-            "Cite code evidence. One round only."
+        intent_summary: str,
+    ) -> str | None:
+        """Round 2: Judge identifies disagreement and asks clarifying questions."""
+        if not agent:
+            return None
+
+        prompt = build_judge_clarification_prompt(
+            finding_summary, prosecutor_argument, defense_argument, intent_summary,
         )
 
         try:
-            response = await agent.execute(prompt, PROSECUTOR_SYSTEM_PROMPT)
-            return _parse_agent_argument(response, agent, "prosecutor_rebuttal")
+            response = await agent.execute(prompt, JUDGE_CLARIFICATION_SYSTEM_PROMPT)
+            return response
         except AgentError as e:
-            logger.error("debate.rebuttal_failed", error=str(e))
+            logger.error("debate.judge_clarification_failed", error=str(e))
             return None
+
+    async def _run_round2_response(
+        self,
+        agent: BaseAgent | None,
+        agent_name: str,
+        role: str,
+        finding_summary: str,
+        judge_questions: str,
+    ) -> AgentArgument | None:
+        """Round 2: Prosecutor or defense responds to judge's targeted questions."""
+        if not agent:
+            return AgentArgument(
+                agent_name=agent_name, role=f"{role}_round2",
+                position="unclear", argument="Agent unavailable", confidence=0.0,
+            )
+
+        system = PROSECUTOR_SYSTEM_PROMPT if role == "prosecutor" else DEFENSE_SYSTEM_PROMPT
+        prompt = (
+            f"## Finding Under Review\n\n{finding_summary}\n\n"
+            f"## Judge's Questions for You ({role.title()})\n\n{judge_questions}\n\n"
+            f"Answer the judge's specific questions. Cite code evidence. "
+            f"Be concise and directly address each question."
+        )
+
+        try:
+            response = await agent.execute(prompt, system)
+            return _parse_agent_argument(response, agent, f"{role}_round2")
+        except AgentError as e:
+            logger.error("debate.round2_response_failed", role=role, error=str(e))
+            return None
+
+    async def _run_judge_final(
+        self,
+        agent: BaseAgent | None,
+        agent_name: str,
+        finding_summary: str,
+        prosecutor_argument: str,
+        defense_argument: str,
+        judge_questions: str,
+        prosecution_response: str,
+        defense_response: str,
+        intent_summary: str,
+    ) -> tuple[AgentArgument | None, str]:
+        """Round 2: Judge makes final ruling after hearing both sides' responses."""
+        if not agent:
+            return AgentArgument(
+                agent_name=agent_name, role="judge",
+                position="unclear", argument="Agent unavailable", confidence=0.0,
+            ), ""
+
+        prompt = build_judge_final_prompt(
+            finding_summary, prosecutor_argument, defense_argument,
+            judge_questions, prosecution_response, defense_response,
+            intent_summary,
+        )
+
+        try:
+            response = await agent.execute(prompt, JUDGE_SYSTEM_PROMPT)
+            return _parse_agent_argument(response, agent, "judge"), response
+        except AgentError as e:
+            logger.error("debate.judge_final_failed", error=str(e))
+            return None, ""
 
     async def _run_judge(
         self,

@@ -348,7 +348,11 @@ class DebateRecord(BaseModel):
     prosecutor_argument: AgentArgument
     defense_argument: AgentArgument
     judge_ruling: AgentArgument
-    rebuttal: AgentArgument | None = None
+    rebuttal: AgentArgument | None = None  # deprecated, kept for compat
+    judge_questions: str | None = None
+    round_2_prosecution: AgentArgument | None = None
+    round_2_defense: AgentArgument | None = None
+    rounds_used: int = 1
     consensus: ConsensusOutcome = ConsensusOutcome.UNCLEAR
     final_severity: Severity = Severity.MEDIUM
     final_confidence: float = 0.5

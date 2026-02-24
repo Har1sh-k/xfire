@@ -45,7 +45,7 @@ class DebateConfig(BaseModel):
     judge_preference: list[str] = Field(
         default_factory=lambda: ["codex", "gemini", "claude"],
     )
-    enable_rebuttal: bool = True
+    max_rounds: int = 2  # min 1 (defense concedes), max 2 (judge-led round 2)
     require_evidence_citations: bool = True
     min_agents_for_debate: int = 2
 

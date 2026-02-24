@@ -41,12 +41,14 @@ agents:
     timeout: 300
 
   debate:
-    role_assignment: rotate            # rotate | fixed
+    role_assignment: evidence          # evidence | rotate | fixed
     fixed_roles:
       prosecutor: claude
       defense: codex
       judge: gemini
-    enable_rebuttal: true
+    defense_preference: [codex, claude, gemini]
+    judge_preference: [codex, gemini, claude]
+    max_rounds: 2                      # min 1 (defense concedes), max 2 (judge-led)
     require_evidence_citations: true
     min_agents_for_debate: 2
 
