@@ -193,6 +193,241 @@ def analyze_diff(
 
 
 @app.command()
+def baseline(
+    repo_dir: str = typer.Argument(".", help="Path to the repository root"),
+    force: bool = typer.Option(False, help="Rebuild baseline even if one already exists"),
+    verbose: bool = typer.Option(False, help="Enable verbose logging"),
+) -> None:
+    """Build persistent repo baseline context in .crossfire/baseline/."""
+    from crossfire.config.settings import ConfigError, load_settings
+    from crossfire.core.baseline import BaselineManager
+
+    if verbose:
+        import logging
+        logging.basicConfig(level=logging.DEBUG)
+
+    try:
+        settings = load_settings(repo_dir=repo_dir)
+    except ConfigError as e:
+        _handle_error(str(e))
+
+    mgr = BaselineManager(repo_dir)
+
+    if mgr.exists() and not force:
+        console.print(
+            "[yellow]Baseline already exists at .crossfire/baseline/[/yellow]\n"
+            "Use [bold]--force[/bold] to rebuild."
+        )
+        # Show summary of existing baseline
+        try:
+            b = mgr.load()
+            console.print(f"  Purpose: {b.intent.repo_purpose[:120]}")
+            console.print(f"  Capabilities: {len(b.intent.intended_capabilities)}")
+            console.print(f"  Trust boundaries: {len(b.intent.trust_boundaries)}")
+            console.print(f"  Security controls: {len(b.intent.security_controls_detected)}")
+            if b.scan_state:
+                console.print(f"  Baseline commit: {b.scan_state.baseline_commit[:12] or 'unknown'}")
+                console.print(f"  Known findings: {len(b.known_findings)}")
+        except Exception:
+            pass
+        return
+
+    console.print(Panel(
+        f"[bold]CrossFire Baseline Builder[/bold]\n"
+        f"Repo: {repo_dir}",
+        title="🔥 CrossFire",
+        border_style="yellow",
+    ))
+
+    try:
+        b = mgr.build(settings=settings)
+    except Exception as e:
+        _handle_error(f"Baseline build failed: {e}", e)
+
+    console.print("[green]Baseline built successfully.[/green]")
+    console.print(f"  Purpose: {b.intent.repo_purpose[:120]}")
+    console.print(f"  Capabilities detected: {len(b.intent.intended_capabilities)}")
+    console.print(f"  Trust boundaries: {len(b.intent.trust_boundaries)}")
+    console.print(f"  Security controls: {len(b.intent.security_controls_detected)}")
+    console.print(f"  Sensitive paths: {len(b.intent.sensitive_paths)}")
+    console.print(f"\nFiles written to: {repo_dir}/.crossfire/baseline/")
+
+
+@app.command()
+def scan(
+    repo_dir: str = typer.Argument(".", help="Path to the repository root"),
+    # Input mode options (exactly one required)
+    base: str | None = typer.Option(None, help="Base branch/commit (use with --head)"),
+    head: str | None = typer.Option(None, help="Head branch/commit (use with --base)"),
+    range: str | None = typer.Option(None, "--range", help="Commit range e.g. abc123~1..abc123"),
+    diff: str | None = typer.Option(None, "--diff", help="Path to a .patch file"),
+    since_last_scan: bool = typer.Option(False, help="Scan all commits since last scan"),
+    since: str | None = typer.Option(None, "--since", help="All commits since date (2026-02-01)"),
+    last: int | None = typer.Option(None, "--last", help="Last N commits"),
+    # Standard options
+    agents: str | None = typer.Option(None, help="Comma-separated: claude,codex,gemini"),
+    skip_debate: bool = typer.Option(False, help="Skip adversarial debate phase"),
+    context_depth: str | None = typer.Option(None, help="Context depth: shallow|medium|deep"),
+    format: str = typer.Option("markdown", help="Output format: markdown|json|sarif"),
+    output: str | None = typer.Option(None, help="Output file path"),
+    verbose: bool = typer.Option(False, help="Enable verbose logging"),
+    dry_run: bool = typer.Option(False, help="Show what would be analyzed without calling agents"),
+) -> None:
+    """Baseline-aware scan: auto-builds baseline, runs full pipeline, skips known findings."""
+    import asyncio
+
+    from crossfire.agents.fast_model import FastModel
+    from crossfire.config.settings import ConfigError, load_settings
+    from crossfire.core.baseline import BaselineManager
+    from crossfire.core.diff_resolver import DiffResolver, DiffResolverError
+    from crossfire.core.orchestrator import CrossFireOrchestrator
+
+    if verbose:
+        import logging
+        logging.basicConfig(level=logging.DEBUG)
+
+    # Validate input modes — exactly one required
+    mode_count = sum([
+        bool(base and head),
+        bool(range),
+        bool(diff),
+        bool(since_last_scan),
+        bool(since),
+        bool(last),
+    ])
+    if mode_count == 0:
+        _handle_error(
+            "Must specify one input mode: --base/--head, --range, --diff, "
+            "--since-last-scan, --since, or --last."
+        )
+    if mode_count > 1:
+        _handle_error("Only one input mode can be used at a time.")
+
+    cli_overrides: dict = {}
+    if context_depth:
+        cli_overrides["analysis"] = {"context_depth": context_depth}
+
+    try:
+        settings = load_settings(repo_dir=repo_dir, cli_overrides=cli_overrides)
+    except ConfigError as e:
+        _handle_error(str(e))
+
+    agent_list = _parse_agents_list(agents)
+    if agent_list:
+        for name in list(settings.agents.keys()):
+            if name not in agent_list:
+                settings.agents[name].enabled = False
+
+    # Resolve diff
+    try:
+        if base and head:
+            diff_result = DiffResolver.from_refs(repo_dir, base, head)
+            mode_desc = f"{base}..{head}"
+        elif range:
+            diff_result = DiffResolver.from_range(repo_dir, range)
+            mode_desc = range
+        elif diff:
+            diff_result = DiffResolver.from_patch(diff, repo_dir)
+            mode_desc = f"patch:{diff}"
+        elif since_last_scan:
+            mgr_tmp = BaselineManager(repo_dir)
+            scan_state = None
+            if mgr_tmp.exists():
+                b_tmp = mgr_tmp.load()
+                scan_state = b_tmp.scan_state
+            diff_result = DiffResolver.from_since_last_scan(repo_dir, scan_state or object())
+            mode_desc = "since-last-scan"
+        elif since:
+            diff_result = DiffResolver.from_since_date(repo_dir, since)
+            mode_desc = f"since:{since}"
+        else:
+            diff_result = DiffResolver.from_last_n(repo_dir, last)
+            mode_desc = f"last-{last}-commits"
+    except DiffResolverError as e:
+        _handle_error(str(e))
+    except Exception as e:
+        _handle_error(f"Failed to resolve diff: {e}", e)
+
+    console.print(Panel(
+        f"[bold]CrossFire Scan[/bold]\n"
+        f"Repo: {repo_dir} | Range: {mode_desc}\n"
+        f"Diff: {diff_result.diff_text.count(chr(10))} lines\n"
+        f"Agents: {', '.join(n for n, c in settings.agents.items() if c.enabled)}\n"
+        f"Context: {settings.analysis.context_depth} | Debate: {'skip' if skip_debate else 'enabled'}",
+        title="🔥 CrossFire",
+        border_style="red",
+    ))
+
+    if dry_run:
+        console.print("[yellow]Dry run mode — would scan the above, exiting.[/yellow]")
+        raise typer.Exit(0)
+
+    if not diff_result.diff_text.strip():
+        console.print("[yellow]No diff content found — nothing to scan.[/yellow]")
+        raise typer.Exit(0)
+
+    # Baseline management
+    mgr = BaselineManager(repo_dir)
+    fast_model = FastModel(settings.fast_model)
+
+    baseline_obj = None
+
+    if not mgr.exists():
+        console.print(
+            "[yellow]No baseline found. Building baseline first...[/yellow]"
+        )
+        try:
+            baseline_obj = mgr.build(settings=settings)
+            console.print("[green]Baseline built.[/green]")
+        except Exception as e:
+            _handle_error(f"Baseline build failed: {e}", e)
+    else:
+        # Check if intent changed
+        console.print("[dim]Checking if diff changes repo intent...[/dim]")
+        try:
+            intent_changed = asyncio.run(
+                mgr.check_intent_changed(diff_result.diff_text, fast_model)
+            )
+            if intent_changed:
+                console.print(
+                    "[yellow]Diff changes repo security model — rebuilding baseline...[/yellow]"
+                )
+                try:
+                    baseline_obj = mgr.build(settings=settings)
+                    console.print("[green]Baseline rebuilt.[/green]")
+                except Exception as e:
+                    _handle_error(f"Baseline rebuild failed: {e}", e)
+        except Exception as e:
+            console.print(f"[dim]Intent check error ({e}) — using existing baseline.[/dim]")
+
+    # Load baseline
+    if baseline_obj is None:
+        try:
+            baseline_obj = mgr.load()
+        except Exception as e:
+            _handle_error(f"Failed to load baseline: {e}", e)
+
+    # Run pipeline
+    orchestrator = CrossFireOrchestrator(settings)
+    try:
+        report_result = asyncio.run(orchestrator.scan_with_baseline(
+            repo_dir=repo_dir,
+            diff_result=diff_result,
+            baseline=baseline_obj,
+            fast_model=fast_model,
+            skip_debate=skip_debate,
+        ))
+    except Exception as e:
+        _handle_error(f"Scan failed: {e}", e)
+
+    # Print delta summary
+    console.print(f"\n[bold]Scan complete.[/bold] {report_result.summary}")
+
+    _output_report(report_result, format, output, False)
+    _check_severity_gate(report_result, settings)
+
+
+@app.command()
 def report(
     input: str = typer.Option(..., help="Path to a CrossFire JSON results file"),
     format: str = typer.Option("markdown", help="Output format: markdown|json|sarif"),

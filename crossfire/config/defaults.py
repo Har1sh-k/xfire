@@ -67,4 +67,12 @@ DEFAULT_CONFIG: dict = {
         "require_debate": True,
     },
     "suppressions": [],
+    "fast_model": {
+        "provider": "claude",
+        "model": "claude-haiku-4-5-20251001",
+        "api_key_env": "ANTHROPIC_API_KEY",
+        "cli_command": "claude",
+        "cli_args": ["--output-format", "json"],
+        "timeout": 60,
+    },
 }

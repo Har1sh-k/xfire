@@ -87,6 +87,17 @@ class SeverityGateConfig(BaseModel):
     require_debate: bool = True
 
 
+class FastModelConfig(BaseModel):
+    """Configuration for the fast model used for cheap inference (intent check, context prompt)."""
+
+    provider: str = "claude"
+    model: str = "claude-haiku-4-5-20251001"
+    api_key_env: str = "ANTHROPIC_API_KEY"
+    cli_command: str = "claude"
+    cli_args: list[str] = Field(default_factory=lambda: ["--output-format", "json"])
+    timeout: int = 60
+
+
 class CrossFireSettings(BaseModel):
     """Root configuration model for CrossFire."""
 
@@ -97,6 +108,7 @@ class CrossFireSettings(BaseModel):
     skills: SkillsConfig = Field(default_factory=SkillsConfig)
     severity_gate: SeverityGateConfig = Field(default_factory=SeverityGateConfig)
     suppressions: list[dict[str, Any]] = Field(default_factory=list)
+    fast_model: FastModelConfig = Field(default_factory=FastModelConfig)
 
 
 def _deep_merge(base: dict, override: dict) -> dict:
@@ -188,6 +200,8 @@ def load_settings(
     try:
         agents, debate, skills = _parse_agents_config(merged)
 
+        fast_model_raw = merged.get("fast_model", {})
+
         return CrossFireSettings(
             repo=RepoConfig(**merged.get("repo", {})),
             analysis=AnalysisConfig(**merged.get("analysis", {})),
@@ -196,6 +210,7 @@ def load_settings(
             skills=skills,
             severity_gate=SeverityGateConfig(**merged.get("severity_gate", {})),
             suppressions=merged.get("suppressions", []),
+            fast_model=FastModelConfig(**fast_model_raw) if fast_model_raw else FastModelConfig(),
         )
     except Exception as e:
         raise ConfigError(f"Invalid configuration: {e}") from e

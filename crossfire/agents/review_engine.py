@@ -152,6 +152,7 @@ class ReviewEngine:
         context: PRContext,
         intent: IntentProfile,
         skill_outputs: dict[str, str],
+        system_prompt: str | None = None,
     ) -> list[AgentReview]:
         """Run independent reviews from all enabled agents in parallel.
 
@@ -160,9 +161,16 @@ class ReviewEngine:
         3. Parse each agent's structured JSON response
         4. Handle failures gracefully
         5. Return all successful reviews
+
+        Args:
+            system_prompt: Optional repo-specific system prompt from fast model.
+                           If None, falls back to REVIEW_SYSTEM_PROMPT.
         """
         # Build the review prompt (same for all agents — fair comparison)
         user_prompt = build_review_prompt(context, intent, skill_outputs)
+
+        # Use provided system prompt or fall back to the default
+        effective_system_prompt = system_prompt or REVIEW_SYSTEM_PROMPT
 
         # Create agent instances
         agents: list[BaseAgent] = []
@@ -182,7 +190,7 @@ class ReviewEngine:
 
         # Dispatch all reviews in parallel
         tasks = [
-            self._dispatch_to_agent(agent, user_prompt, REVIEW_SYSTEM_PROMPT)
+            self._dispatch_to_agent(agent, user_prompt, effective_system_prompt)
             for agent in agents
         ]
         results = await asyncio.gather(*tasks, return_exceptions=True)

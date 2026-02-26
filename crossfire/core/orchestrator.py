@@ -23,6 +23,7 @@ from crossfire.core.models import (
     DebateRecord,
     DebateTag,
     Finding,
+    FindingStatus,
     IntentProfile,
     PRContext,
 )
@@ -124,6 +125,178 @@ class CrossFireOrchestrator:
         report.review_duration_seconds = time.monotonic() - start_time
 
         return report
+
+    async def scan_with_baseline(
+        self,
+        repo_dir: str,
+        diff_result: object,
+        baseline: object,
+        fast_model: object,
+        skip_debate: bool = False,
+    ) -> CrossFireReport:
+        """Run the full analysis pipeline using pre-built baseline context.
+
+        Steps:
+          1. Fast model → repo-specific context-aware system prompt
+          2. Build PRContext from diff_result
+          3. Use baseline.intent (skip intent inference)
+          4. Run skills
+          5. run_independent_reviews with context_system_prompt
+          6. Synthesize findings
+          7. filter_known() — split new vs known
+          8. Debate only new findings
+          9. Apply policy
+          10. baseline.update_after_scan()
+          11. Return CrossFireReport with known_skipped_count in summary
+        """
+        from crossfire.agents.prompts.context_prompt import build_context_system_prompt
+        from crossfire.core.baseline import BaselineManager
+        from crossfire.core.diff_resolver import DiffResult
+
+        start_time = time.monotonic()
+
+        # Type-narrow for local use
+        diff_result_typed: DiffResult = diff_result  # type: ignore[assignment]
+        baseline_typed = baseline  # type: ignore[assignment]
+
+        # 1. Build repo-specific system prompt from fast model
+        diff_summary = diff_result_typed.diff_text[:2000]
+        logger.info("pipeline.context_prompt_building")
+        context_system_prompt = await build_context_system_prompt(
+            baseline_typed, diff_summary, fast_model  # type: ignore[arg-type]
+        )
+
+        # 2. Build PRContext from diff
+        logger.info(
+            "pipeline.context_building",
+            repo_dir=repo_dir,
+            range=diff_result_typed.commit_range_desc,
+        )
+        context = self.context_builder.build_from_diff(
+            diff_text=diff_result_typed.diff_text,
+            repo_dir=repo_dir,
+            base_ref=diff_result_typed.base_commit or "HEAD~1",
+            pr_title=f"Scan: {diff_result_typed.commit_range_desc}",
+        )
+
+        # 3. Use baseline intent directly (no re-inference)
+        intent: IntentProfile = baseline_typed.intent
+
+        logger.info(
+            "pipeline.intent_from_baseline",
+            purpose=intent.repo_purpose[:80],
+            capabilities=len(intent.intended_capabilities),
+        )
+
+        # 4. Run skills
+        logger.info("pipeline.skills_running")
+        skill_outputs = await asyncio.to_thread(
+            self._run_skills, context, intent, repo_dir
+        )
+        logger.info("pipeline.skills_complete", skills=list(skill_outputs.keys()))
+
+        # 5. Independent reviews with context-aware system prompt
+        logger.info("pipeline.agent_reviews")
+        reviews = await self.review_engine.run_independent_reviews(
+            context, intent, skill_outputs, system_prompt=context_system_prompt
+        )
+        logger.info(
+            "pipeline.reviews_complete",
+            agent_count=len(reviews),
+            total_findings=sum(len(r.findings) for r in reviews),
+        )
+
+        # 6. Synthesize findings
+        logger.info("pipeline.synthesizing")
+        all_findings = self.finding_synthesizer.synthesize(reviews, intent)
+
+        # 7. Filter known findings (delta scanning)
+        baseline_mgr = BaselineManager(repo_dir)
+        new_findings, known_skipped = baseline_mgr.filter_known(all_findings, baseline_typed)
+        logger.info(
+            "pipeline.delta_filter",
+            new=len(new_findings),
+            known_skipped=len(known_skipped),
+        )
+
+        # 8. Debate only new findings
+        debates: list[DebateRecord] = []
+        if not skip_debate and new_findings:
+            debate_findings = [f for f in new_findings if f.debate_tag == DebateTag.NEEDS_DEBATE]
+            if debate_findings:
+                from crossfire.core.finding_synthesizer import compute_debate_budget
+
+                changed_lines = sum(
+                    sum(len(h.added_lines) + len(h.removed_lines) for h in f.diff_hunks)
+                    for f in context.files
+                )
+                budget = compute_debate_budget(changed_lines)
+                logger.info(
+                    "pipeline.debate_starting",
+                    count=len(debate_findings),
+                    budget=budget,
+                )
+                debate_results = await self.debate_engine.debate_all(
+                    findings=debate_findings,
+                    context=context,
+                    intent=intent,
+                    debate_budget=budget,
+                )
+                debates = [dr for _, dr in debate_results]
+                logger.info("pipeline.debate_complete", debates=len(debates))
+        else:
+            logger.info("pipeline.debate_skipped")
+
+        # 9. Apply policy
+        new_findings = self.policy_engine.apply(new_findings)
+
+        # 10. Update baseline with confirmed findings
+        confirmed_findings = [
+            f for f in new_findings
+            if f.status in (FindingStatus.CONFIRMED, FindingStatus.LIKELY)
+        ]
+        baseline_mgr.update_after_scan(diff_result_typed.head_commit, confirmed_findings)
+
+        # 11. Build report
+        overall_risk = self._compute_overall_risk(new_findings)
+        agents_used = [r.agent_name for r in reviews]
+        summary = self._build_scan_summary(new_findings, reviews, debates, len(known_skipped))
+
+        report = CrossFireReport(
+            repo_name=context.repo_name,
+            pr_title=context.pr_title,
+            context=context,
+            intent=intent,
+            agent_reviews=reviews,
+            findings=new_findings,
+            debates=debates,
+            overall_risk=overall_risk,
+            summary=summary,
+            agents_used=agents_used,
+            review_duration_seconds=time.monotonic() - start_time,
+        )
+        return report
+
+    def _build_scan_summary(
+        self,
+        findings: list[Finding],
+        reviews: list,
+        debates: list[DebateRecord],
+        known_skipped_count: int,
+    ) -> str:
+        """Build scan summary including delta information."""
+        confirmed = [f for f in findings if f.status == FindingStatus.CONFIRMED]
+        likely = [f for f in findings if f.status == FindingStatus.LIKELY]
+        unclear = [f for f in findings if f.status == FindingStatus.UNCLEAR]
+        rejected = [f for f in findings if f.status == FindingStatus.REJECTED]
+
+        parts = [
+            f"{len(confirmed)} confirmed, {len(likely)} likely, "
+            f"{len(unclear)} unclear, {len(rejected)} rejected",
+            f"from {len(reviews)} agent(s) with {len(debates)} debate(s)",
+            f"{len(confirmed) + len(likely)} new | {known_skipped_count} known skipped",
+        ]
+        return " | ".join(parts)
 
     async def _run_pipeline(
         self,
