@@ -161,12 +161,12 @@ crossfire scan . --base main --head feature
               |
               v
 +------------------------------+
-|     Context Builder           |  Same diff enrichment as stateless mode
+|     Context Builder           |  diff hunks + full changed files, reads from base_commit git ref
 +-------------+----------------+  (no intent re-inference — uses baseline.intent)
               |
               v
 +------------------------------+
-|     Skills (pre-compute)      |  Same as stateless pipeline
+|     Skills (pre-compute)      |  data flow, git blame, config risks, dependency analysis, test gaps
 +-------------+----------------+
               |
               v
@@ -177,7 +177,7 @@ crossfire scan . --base main --head feature
               |
               v
 +------------------------------+
-|   Finding Synthesizer         |  Same as stateless pipeline
+|   Finding Synthesizer         |  union-find clustering, cross-validation boost, purpose-aware adjustments
 +-------------+----------------+
               |
               v
@@ -194,7 +194,7 @@ crossfire scan . --base main --head feature
               |
               v
 +------------------------------+
-|   Policy Engine               |  Same as stateless pipeline
+|   Policy Engine               |  suppression rules (category, file, title)
 +-------------+----------------+
               |
               v

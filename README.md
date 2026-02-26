@@ -109,9 +109,10 @@ crossfire scan . --base main --head feature
         |
         v
   ContextBuilder.build_from_diff() → PRContext
+  (diff hunks + full file contents, reads files from base_commit git ref)
         |
         v
-  Skills (same as stateless pipeline)
+  Skills (data flow, git blame, config risks, dependency analysis, test gaps)
         |
         v
   ReviewEngine.run_independent_reviews(..., system_prompt=context_prompt)
@@ -155,14 +156,14 @@ crossfire scan . --base main --head feature
 Requires Python 3.11+.
 
 ```bash
+# From PyPI
 pip install crossfire
-```
 
-Or install from source:
-
-```bash
-git clone https://github.com/your-org/crossfire
-cd crossfire
+# Or install from source
+git clone https://github.com/Har1sh-k/CrossFire
+cd CrossFire
+python -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
 ```
 
