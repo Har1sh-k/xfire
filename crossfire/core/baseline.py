@@ -23,6 +23,7 @@ from crossfire.core.intent_inference import IntentInferrer
 from crossfire.core.models import Finding, IntentProfile
 
 if TYPE_CHECKING:
+    from crossfire.agents.base import BaseAgent
     from crossfire.agents.fast_model import FastModel
     from crossfire.config.settings import CrossFireSettings
 
@@ -141,6 +142,7 @@ class BaselineManager:
         settings: CrossFireSettings | None = None,
         head_commit: str = "",
         base_ref: str = "",
+        agent: "BaseAgent | None" = None,
     ) -> Baseline:
         """Build baseline from the repo context and write all files.
 
@@ -153,6 +155,8 @@ class BaselineManager:
                       main..feature, pass the base commit so the baseline
                       reflects the repo before the changes under review.
                       Falls back to the working tree when empty.
+            agent: Optional LLM agent (Claude Sonnet) for threat-model-quality
+                   intent inference. Falls back to heuristics if None.
 
         Acquires a PID lock file to prevent concurrent baseline rebuilds.
         """
@@ -162,7 +166,7 @@ class BaselineManager:
         # Write PID lock
         lock_path.write_text(str(os.getpid()))
         try:
-            return self._do_build(settings, head_commit, base_ref)
+            return self._do_build(settings, head_commit, base_ref, agent)
         finally:
             lock_path.unlink(missing_ok=True)
 
@@ -171,6 +175,7 @@ class BaselineManager:
         settings: CrossFireSettings | None = None,
         head_commit: str = "",
         base_ref: str = "",
+        agent: "BaseAgent | None" = None,
     ) -> Baseline:
         """Internal build logic — runs intent inference on repo at base_ref.
 
@@ -229,10 +234,20 @@ class BaselineManager:
             directory_structure=directory_structure,
         )
 
-        # Run intent inference
+        # Run intent inference — LLM (threat model) if agent provided, else heuristic
+        import asyncio as _asyncio
+
+        from crossfire.core.intent_inference import infer_with_llm
+
         repo_config = settings.repo if settings else None
         inferrer = IntentInferrer(repo_config)
-        intent = inferrer.infer(context)
+
+        if agent is not None:
+            logger.info("baseline.intent_llm", agent=getattr(agent, "name", "?"))
+            intent = _asyncio.run(infer_with_llm(context, agent))
+        else:
+            logger.info("baseline.intent_heuristic")
+            intent = inferrer.infer(context)
 
         # Build context.md
         now = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -436,7 +451,8 @@ class BaselineManager:
                 ["git", "rev-parse", "HEAD"],
                 cwd=self.repo_dir,
                 capture_output=True,
-                text=True,
+                encoding='utf-8',
+                errors='replace',
                 timeout=10,
             )
             if result.returncode == 0:
@@ -474,7 +490,8 @@ def _collect_config_files_at_ref(repo_dir: str, ref: str) -> dict[str, str]:
                 ["git", "show", f"{ref}:{filename}"],
                 cwd=repo_dir,
                 capture_output=True,
-                text=True,
+                encoding='utf-8',
+                errors='replace',
                 timeout=10,
             )
             if proc.returncode == 0 and proc.stdout:
@@ -499,7 +516,8 @@ def _get_directory_structure_at_ref(repo_dir: str, ref: str) -> str:
             ["git", "ls-tree", "-r", "--name-only", ref],
             cwd=repo_dir,
             capture_output=True,
-            text=True,
+            encoding='utf-8',
+            errors='replace',
             timeout=15,
         )
         if proc.returncode != 0 or not proc.stdout.strip():

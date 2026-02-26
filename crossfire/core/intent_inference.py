@@ -1,17 +1,145 @@
 """Purpose and intent inference for CrossFire.
 
-Infers what a repository does, what capabilities are intended, and what
-security controls exist — all without LLM calls. Uses multi-signal
-heuristics: config overrides, README parsing, package metadata, file
-structure patterns, dependency analysis, and security control scanning.
+Two modes:
+- Heuristic: multi-signal regex/dependency analysis (no LLM, always available)
+- LLM: infer_with_llm() uses Claude Sonnet as a threat modeller — produces a
+  full threat model: trust boundaries, attack surface, intended capabilities,
+  security controls. Falls back to heuristic if the LLM call fails.
 """
 
 from __future__ import annotations
 
+import json
 import re
+from typing import TYPE_CHECKING
 
 from crossfire.config.settings import RepoConfig
 from crossfire.core.models import IntentProfile, PRContext, SecurityControl, TrustBoundary
+
+if TYPE_CHECKING:
+    from crossfire.agents.base import BaseAgent
+
+
+# ---------------------------------------------------------------------------
+# LLM-based threat modelling
+# ---------------------------------------------------------------------------
+
+INTENT_INFERENCE_SYSTEM = """You are a senior security architect performing threat modelling on a code repository.
+
+Analyze the provided repository context and produce a structured threat model that will guide a security code review.
+
+Respond ONLY with a valid JSON object — no markdown fences, no explanation, no preamble.
+
+JSON schema:
+{
+  "repo_purpose": "1-3 sentence description of what this system does and who uses it",
+  "deployment_context": "where/how deployed — local agent, cloud service, CI runner, CLI tool, etc.",
+  "intended_capabilities": [
+    "short string describing each intentional capability — e.g. 'execute user code in sandboxed subprocess', 'manage OAuth tokens for 3rd-party services', 'route WebSocket messages between clients'"
+  ],
+  "trust_boundaries": [
+    {
+      "name": "boundary name",
+      "description": "what crosses this boundary and why it matters",
+      "untrusted_inputs": ["input sources that arrive from untrusted parties"],
+      "controls": ["controls that gate this boundary"]
+    }
+  ],
+  "security_controls": [
+    {
+      "control_type": "type e.g. auth_check, rate_limit, input_validation, sandbox",
+      "location": "file or component where this control lives",
+      "description": "what it protects and how",
+      "covers": ["what attack surfaces it covers"]
+    }
+  ],
+  "sensitive_paths": ["path/to/auth", "path/to/payments", "etc."],
+  "threat_summary": "2-3 sentence summary of the primary threat model — what attackers would target and how"
+}
+
+Be specific and technical. The intended_capabilities list is critical — it tells security reviewers what the system is *supposed* to do so they don't flag intentional behaviour as bugs."""
+
+
+async def infer_with_llm(context: PRContext, agent: "BaseAgent") -> IntentProfile:
+    """Use Claude Sonnet as a threat modeller to build a structured IntentProfile.
+
+    Sends README + directory structure + key configs to the agent and parses
+    the JSON threat model response into an IntentProfile.
+
+    Falls back to heuristic IntentInferrer().infer(context) on any failure.
+    """
+    readme = (context.readme_content or "")[:4000]
+    directory = (context.directory_structure or "")[:2000]
+
+    config_summary = ""
+    for name, content in list((context.config_files or {}).items())[:6]:
+        config_summary += f"\n### {name}\n{content[:600]}\n"
+
+    prompt = (
+        f"Perform threat modelling on this repository.\n\n"
+        f"## README\n{readme}\n\n"
+        f"## Directory Structure\n{directory}\n\n"
+        f"## Key Config / Manifest Files\n{config_summary}\n\n"
+        f"Return the JSON threat model object only."
+    )
+
+    try:
+        raw = await agent.execute(prompt, INTENT_INFERENCE_SYSTEM)
+        data = _extract_json(raw)
+
+        trust_boundaries = [
+            TrustBoundary(
+                name=tb.get("name", ""),
+                description=tb.get("description", ""),
+                untrusted_inputs=tb.get("untrusted_inputs", []),
+                controls=tb.get("controls", []),
+            )
+            for tb in data.get("trust_boundaries", [])
+        ]
+
+        security_controls = [
+            SecurityControl(
+                control_type=sc.get("control_type", ""),
+                location=sc.get("location", ""),
+                description=sc.get("description", ""),
+                covers=sc.get("covers", []),
+            )
+            for sc in data.get("security_controls", [])
+        ]
+
+        purpose = data.get("repo_purpose", "")
+        threat_summary = data.get("threat_summary", "")
+        if threat_summary:
+            purpose = f"{purpose}\n\nThreat summary: {threat_summary}"
+
+        return IntentProfile(
+            repo_purpose=purpose,
+            intended_capabilities=data.get("intended_capabilities", []),
+            trust_boundaries=trust_boundaries,
+            security_controls_detected=security_controls,
+            deployment_context=data.get("deployment_context"),
+            sensitive_paths=data.get("sensitive_paths", []),
+        )
+
+    except Exception:
+        # Fall back to heuristic inference
+        return IntentInferrer().infer(context)
+
+
+def _extract_json(text: str) -> dict:
+    """Extract JSON object from LLM response."""
+    text = text.strip()
+    # Strip markdown fences
+    if "```" in text:
+        m = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", text, re.DOTALL)
+        if m:
+            text = m.group(1).strip()
+    # Find outermost braces
+    first = text.find("{")
+    last = text.rfind("}")
+    if first != -1 and last != -1:
+        text = text[first : last + 1]
+    return json.loads(text)
 
 
 # ---------------------------------------------------------------------------

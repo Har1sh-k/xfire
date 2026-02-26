@@ -47,7 +47,8 @@ def _run_git(repo_dir: str, args: list[str], timeout: int = 60) -> str | None:
             ["git"] + args,
             cwd=repo_dir,
             capture_output=True,
-            text=True,
+            encoding='utf-8',
+            errors='replace',
             timeout=timeout,
         )
         if result.returncode == 0:

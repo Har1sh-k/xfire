@@ -100,15 +100,32 @@ class BaseAgent(ABC):
         self, cmd: list[str], timeout: int | None = None
     ) -> str:
         """Run a subprocess asynchronously with timeout."""
+        import os
+        import sys
+
         timeout = timeout or self.config.timeout
+
+        # On Windows, .cmd/.bat files must be run via cmd.exe /c, and paths
+        # need backslash separators for CreateProcess to find them.
+        if sys.platform == "win32":
+            resolved = [os.path.normpath(cmd[0])] + cmd[1:]
+            if resolved[0].lower().endswith((".cmd", ".bat")):
+                cmd_exe = os.path.join(
+                    os.environ.get("SystemRoot", "C:\\Windows"),
+                    "System32", "cmd.exe",
+                )
+                resolved = [cmd_exe, "/c"] + resolved
+            cmd = resolved
 
         logger.info("agent.subprocess.start", agent=self.name, cmd=cmd[0])
 
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
+                stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                env=os.environ,
             )
             stdout, stderr = await asyncio.wait_for(
                 proc.communicate(), timeout=timeout

@@ -53,6 +53,14 @@ class CrossFireOrchestrator:
         self.debate_engine = DebateEngine(settings)
         self.policy_engine = PolicyEngine(settings.suppressions)
 
+        # Build the Claude agent used for LLM-based intent/threat-model inference
+        from crossfire.agents.claude_adapter import ClaudeAgent
+        self._intent_agent = (
+            ClaudeAgent(settings.agents["claude"])
+            if settings.agents.get("claude") and settings.agents["claude"].enabled
+            else None
+        )
+
     async def analyze_pr(
         self,
         repo: str,
@@ -156,9 +164,14 @@ class CrossFireOrchestrator:
             repo=context.repo_name,
         )
 
-        # 2. Intent inference
-        logger.info("pipeline.intent_inference")
-        intent = self.intent_inferrer.infer(context)
+        # 2. Intent inference — LLM threat model via Sonnet if available
+        from crossfire.core.intent_inference import infer_with_llm
+        if self._intent_agent is not None:
+            logger.info("pipeline.intent_inference", mode="llm")
+            intent = await infer_with_llm(context, self._intent_agent)
+        else:
+            logger.info("pipeline.intent_inference", mode="heuristic")
+            intent = self.intent_inferrer.infer(context)
 
         logger.info(
             "pipeline.intent_ready",
@@ -469,8 +482,13 @@ class CrossFireOrchestrator:
             intent = load_cached_intent(self.cache_dir, context.base_sha)
 
         if intent is None:
-            logger.info("pipeline.intent_inference")
-            intent = self.intent_inferrer.infer(context)
+            from crossfire.core.intent_inference import infer_with_llm
+            if self._intent_agent is not None:
+                logger.info("pipeline.intent_inference", mode="llm")
+                intent = await infer_with_llm(context, self._intent_agent)
+            else:
+                logger.info("pipeline.intent_inference", mode="heuristic")
+                intent = self.intent_inferrer.infer(context)
             if self.cache_dir and context.base_sha:
                 save_intent_cache(self.cache_dir, context.base_sha, intent)
 

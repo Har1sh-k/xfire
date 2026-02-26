@@ -114,7 +114,8 @@ class CodeNavigationSkill(BaseSkill):
                     ["git", "grep", "-n", defn.symbol, "--", "*.py", "*.js", "*.ts"],
                     cwd=repo_dir,
                     capture_output=True,
-                    text=True,
+                    encoding='utf-8',
+                    errors='replace',
                     timeout=10,
                 )
                 if result.returncode == 0:
@@ -152,7 +153,8 @@ class CodeNavigationSkill(BaseSkill):
                     ["git", "grep", "-nE", pattern],
                     cwd=repo_dir,
                     capture_output=True,
-                    text=True,
+                    encoding='utf-8',
+                    errors='replace',
                     timeout=10,
                 )
                 if result.returncode == 0:

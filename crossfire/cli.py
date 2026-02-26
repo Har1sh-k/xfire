@@ -41,6 +41,88 @@ def _handle_error(message: str, exc: Exception | None = None) -> NoReturn:
     raise typer.Exit(1)
 
 
+async def _preflight_check(settings) -> dict[str, tuple[bool, str]]:
+    """Ping each enabled agent to verify it is reachable before running pipeline.
+
+    For CLI mode: runs `<cli_command> --version` as a subprocess.
+    For API mode: checks that the API key env var is set.
+    Returns {agent_name: (ok, message)}.
+    """
+    import asyncio
+    import os
+    import sys
+
+    results: dict[str, tuple[bool, str]] = {}
+
+    for name, cfg in settings.agents.items():
+        if not cfg.enabled:
+            continue
+        if cfg.mode == "cli":
+            cmd = cfg.cli_command
+            if sys.platform == "win32":
+                import os as _os
+                cmd = _os.path.normpath(cmd)
+                if cmd.lower().endswith((".cmd", ".bat")):
+                    cmd_exe = _os.path.join(
+                        os.environ.get("SystemRoot", "C:\\Windows"), "System32", "cmd.exe"
+                    )
+                    full_cmd = [cmd_exe, "/c", cmd, "--version"]
+                else:
+                    full_cmd = [cmd, "--version"]
+            else:
+                full_cmd = [cfg.cli_command, "--version"]
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    *full_cmd,
+                    stdin=asyncio.subprocess.DEVNULL,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    env=os.environ,
+                )
+                stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=15)
+                if proc.returncode == 0:
+                    version = stdout.decode(errors="replace").strip().split("\n")[0][:40]
+                    results[name] = (True, version)
+                else:
+                    results[name] = (False, f"exited {proc.returncode}")
+            except FileNotFoundError:
+                results[name] = (False, f"not found: {cfg.cli_command}")
+            except asyncio.TimeoutError:
+                results[name] = (False, "timed out")
+            except Exception as e:
+                results[name] = (False, str(e)[:80])
+        else:
+            # API mode — check key is present
+            key = os.environ.get(cfg.api_key_env or "")
+            if key:
+                results[name] = (True, f"API key set ({cfg.api_key_env})")
+            else:
+                results[name] = (False, f"API key not set ({cfg.api_key_env})")
+
+    return results
+
+
+def _print_preflight(results: dict[str, tuple[bool, str]]) -> bool:
+    """Print pre-flight results table. Returns True if at least one agent is reachable."""
+    from rich.table import Table
+
+    table = Table(title="Agent Pre-flight Check", border_style="dim")
+    table.add_column("Agent", style="bold")
+    table.add_column("Status")
+    table.add_column("Details", style="dim")
+
+    any_ok = False
+    for name, (ok, msg) in results.items():
+        if ok:
+            table.add_row(name, "[green]✓ reachable[/green]", msg)
+            any_ok = True
+        else:
+            table.add_row(name, "[red]✗ unreachable[/red]", msg)
+
+    console.print(table)
+    return any_ok
+
+
 @app.command()
 def analyze_pr(
     repo: str = typer.Option(..., help="GitHub repo in owner/repo format"),
@@ -237,6 +319,15 @@ def code_review(
         console.print("[yellow]Dry run mode — would audit the above, exiting.[/yellow]")
         raise typer.Exit(0)
 
+    # Pre-flight: verify agents are reachable
+    console.print("[dim]Checking agent reachability...[/dim]")
+    preflight = asyncio.run(_preflight_check(settings))
+    any_ok = _print_preflight(preflight)
+    if not any_ok:
+        _handle_error(
+            "No agents are reachable. Check your CLI tool paths in .crossfire/config.yaml."
+        )
+
     orchestrator = CrossFireOrchestrator(settings)
     try:
         report = asyncio.run(orchestrator.code_review(
@@ -298,8 +389,28 @@ def baseline(
         border_style="yellow",
     ))
 
+    import asyncio
+
+    # Pre-flight check
+    console.print("[dim]Checking agent reachability...[/dim]")
+    preflight = asyncio.run(_preflight_check(settings))
+    _print_preflight(preflight)
+
+    # Use Claude Sonnet for LLM-based threat model if reachable
+    from crossfire.agents.claude_adapter import ClaudeAgent
+    claude_cfg = settings.agents.get("claude")
+    intent_agent = (
+        ClaudeAgent(claude_cfg)
+        if claude_cfg and claude_cfg.enabled and preflight.get("claude", (False,))[0]
+        else None
+    )
+    if intent_agent:
+        console.print("[dim]Using Claude Sonnet for threat-model-quality intent inference...[/dim]")
+    else:
+        console.print("[yellow]Claude unreachable — using heuristic intent inference.[/yellow]")
+
     try:
-        b = mgr.build(settings=settings)
+        b = mgr.build(settings=settings, agent=intent_agent)
     except Exception as e:
         _handle_error(f"Baseline build failed: {e}", e)
 
@@ -429,6 +540,20 @@ def scan(
         console.print("[yellow]No diff content found — nothing to scan.[/yellow]")
         raise typer.Exit(0)
 
+    # Pre-flight: verify agents are reachable before starting
+    console.print("[dim]Checking agent reachability...[/dim]")
+    preflight = asyncio.run(_preflight_check(settings))
+    any_ok = _print_preflight(preflight)
+    if not any_ok:
+        _handle_error(
+            "No agents are reachable. Check your CLI tool paths in .crossfire/config.yaml."
+        )
+
+    # Build Claude agent for LLM-based intent/threat-model inference
+    from crossfire.agents.claude_adapter import ClaudeAgent
+    claude_cfg = settings.agents.get("claude")
+    intent_agent = ClaudeAgent(claude_cfg) if claude_cfg and claude_cfg.enabled and preflight.get("claude", (False,))[0] else None
+
     # Baseline management
     mgr = BaselineManager(repo_dir)
     fast_model = FastModel(settings.fast_model)
@@ -441,12 +566,12 @@ def scan(
 
     if not mgr.exists():
         console.print(
-            "[yellow]No baseline found. Building baseline first...[/yellow]"
+            "[yellow]No baseline found. Building baseline first (threat modelling with Sonnet)...[/yellow]"
         )
         if base_ref:
             console.print(f"[dim]  Reading repo state from base commit {base_ref[:12]}[/dim]")
         try:
-            baseline_obj = mgr.build(settings=settings, base_ref=base_ref)
+            baseline_obj = mgr.build(settings=settings, base_ref=base_ref, agent=intent_agent)
             console.print("[green]Baseline built.[/green]")
         except Exception as e:
             _handle_error(f"Baseline build failed: {e}", e)
@@ -463,7 +588,7 @@ def scan(
                     f"from {base_ref[:12] if base_ref else 'working tree'}...[/yellow]"
                 )
                 try:
-                    baseline_obj = mgr.build(settings=settings, base_ref=base_ref)
+                    baseline_obj = mgr.build(settings=settings, base_ref=base_ref, agent=intent_agent)
                     console.print("[green]Baseline rebuilt.[/green]")
                 except Exception as e:
                     _handle_error(f"Baseline rebuild failed: {e}", e)

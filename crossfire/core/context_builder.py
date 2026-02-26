@@ -230,7 +230,8 @@ def _run_git(args: list[str], repo_dir: str) -> str | None:
             ["git"] + args,
             cwd=repo_dir,
             capture_output=True,
-            text=True,
+            encoding='utf-8',
+            errors='replace',
             timeout=30,
         )
         if result.returncode == 0:
@@ -347,7 +348,8 @@ def _find_reverse_imports(file_path: str, repo_dir: str, language: str | None) -
                 ["git", "grep", "-l", module_name, "--", "*.py"],
                 cwd=repo_dir,
                 capture_output=True,
-                text=True,
+                encoding='utf-8',
+                errors='replace',
                 timeout=15,
             )
             if result.returncode == 0:
