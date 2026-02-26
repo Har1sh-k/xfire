@@ -10,24 +10,41 @@ It runs multiple AI agents independently, has them debate every finding, and onl
 
 ## How It Works
 
-CrossFire has two operating modes: **stateless review** (`analyze-pr`, `analyze-diff`) and **baseline-aware scan** (`scan`).
+CrossFire has three pipelines:
 
-### Stateless Review Pipeline
+| Pipeline | Command | What it reviews |
+|----------|---------|-----------------|
+| **Code Review** | `code-review .` | Entire repo as-is — no diff, no PR, no commits |
+| **PR Review** | `analyze-pr` | A GitHub pull request diff via GitHub API |
+| **Baseline-Aware Scan** | `scan .` | Any commit range, auto-builds baseline, delta scanning |
+
+---
+
+### Code Review Pipeline
+
+Audits the entire codebase as it currently stands. No diff, no PR, no commit context — agents read every source file and assess the full security posture.
 
 ```
-PR Input (GitHub API or local diff/patch)
+crossfire code-review .
         |
         v
-  Context Builder + Intent Inferrer
-  (diff, full files, git history, configs — what does this repo DO?)
+  ContextBuilder.build_from_repo(repo_dir)
+  (walks all source files — .py, .ts, .go, .rs, .yaml, etc.)
+  (no diff hunks; full file contents for every file)
+        |
+        v
+  Intent Inferrer
+  (README, package metadata, file structure, dependencies →
+   what does this repo DO? what trust boundaries exist?)
         |
         v
   Skills (pre-compute context signals)
-  (data flow, git blame, config risks, dependency changes, test gaps)
+  (data flow, git blame, config risks, dependency analysis, test gaps)
         |
         v
   Independent Agent Reviews  [Claude | Codex | Gemini]
-  (each agent reads the code + skills context and identifies issues)
+  (CODE_REVIEW_SYSTEM_PROMPT — "audit the codebase", not "review a PR")
+  (each agent reads full file contents, traces data flows end-to-end)
         |
         v
   Finding Synthesizer
@@ -42,6 +59,31 @@ PR Input (GitHub API or local diff/patch)
         v
   Policy Engine  →  Output (Markdown / JSON / SARIF)
 ```
+
+---
+
+### PR Review Pipeline
+
+Reviews a GitHub pull request — what changed, what security implications those changes introduce.
+
+```
+crossfire analyze-pr --repo owner/repo --pr 123
+        |
+        v
+  GitHub API → diff, file contents (head + base), commits, metadata
+        |
+        v
+  Context Builder + Intent Inferrer
+  (diff hunks, full changed files, git history, configs)
+        |
+        v
+  Skills + Independent Reviews + Debate + Policy
+        |
+        v
+  Output (Markdown / JSON / SARIF / GitHub PR comment)
+```
+
+---
 
 ### Baseline-Aware Scan Pipeline
 
@@ -98,6 +140,7 @@ crossfire scan . --base main --head feature
 ### Why this works
 
 - **No SAST, no rules engine** — agents read and reason, they don't pattern-match
+- **Three pipelines for every scenario** — whole-repo audit, PR diff review, or continuous baseline-aware scanning
 - **Purpose-aware** — intent inference understands what the repo is supposed to do, so "intended capabilities" aren't flagged as bugs
 - **Independent reviews** — agents never see each other's output during review; blind spots from one are caught by another
 - **Adversarial debate** — every finding is stress-tested before it reaches you; false positives get eliminated, not passed through
@@ -131,7 +174,15 @@ pip install -e ".[dev]"
 # Initialize config in your repo
 crossfire init
 
-# --- Stateless review (no persistence) ---
+# --- Code Review Pipeline (whole repo, no diff) ---
+
+# Audit the entire codebase as-is
+crossfire code-review .
+
+# Limit to 50 files (faster, good for large repos)
+crossfire code-review . --max-files 50
+
+# --- PR Review Pipeline (GitHub PR diff) ---
 
 # Analyze a GitHub PR
 crossfire analyze-pr --repo owner/repo --pr 123 --github-token $GITHUB_TOKEN
@@ -142,7 +193,7 @@ crossfire analyze-diff --patch changes.patch --repo-dir /path/to/repo
 # Analyze staged changes before committing
 crossfire analyze-diff --staged --repo-dir .
 
-# --- Baseline-aware scan (persistent, delta scanning) ---
+# --- Baseline-Aware Scan Pipeline (persistent, delta scanning) ---
 
 # Build repo baseline once (or run scan — it auto-builds)
 crossfire baseline .
@@ -379,14 +430,14 @@ make demo
 
 ```
 crossfire/
-  cli.py                    # Typer CLI entry point (8 commands)
+  cli.py                    # Typer CLI entry point (9 commands)
   config/
     defaults.py             # Default configuration values
     settings.py             # Config loader (CLI > env > YAML > defaults)
   core/
     models.py               # All Pydantic v2 models
-    orchestrator.py         # Main pipeline (analyze_pr, analyze_diff, scan_with_baseline)
-    context_builder.py      # Diff parsing + file enrichment
+    orchestrator.py         # Main pipeline (code_review, analyze_pr, analyze_diff, scan_with_baseline)
+    context_builder.py      # Diff parsing + full-repo walking + file enrichment
     intent_inference.py     # What does this repo do?
     finding_synthesizer.py  # Cluster + dedupe + adjust findings
     policy_engine.py        # Suppression rules
@@ -403,7 +454,7 @@ crossfire/
     debate_engine.py        # 2-round judge-led debate
     consensus.py            # Evidence-based verdict logic
     prompts/
-      review_prompt.py      # Default review system prompt + user prompt builder
+      review_prompt.py      # PR review prompt + CODE_REVIEW_SYSTEM_PROMPT (whole-repo)
       context_prompt.py     # Repo-specific prompt generation + intent-change check
       prosecutor_prompt.py
       defense_prompt.py

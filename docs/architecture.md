@@ -6,31 +6,47 @@
 
 ## Pipeline Overview
 
-CrossFire has two operating modes: **stateless review** (`analyze-pr`, `analyze-diff`) and **baseline-aware scan** (`scan`).
+CrossFire has three pipelines.
 
-### Stateless Review Pipeline
+| Pipeline | Command | Context Source |
+|----------|---------|---------------|
+| **Code Review** | `code-review .` | Whole repo — all source files, no diff |
+| **PR Review** | `analyze-pr` | GitHub PR diff via API |
+| **Baseline-Aware Scan** | `scan .` | Any commit range, persistent baseline |
+
+---
+
+### Code Review Pipeline
+
+Audits the entire codebase as it currently stands. No diff, no PR, no commits.
 
 ```
-PR Input (GitHub API or local diff/patch)
+crossfire code-review .
         |
         v
 +------------------------------+
-|     Context Builder           |  Diff parsing + full files + related files + git history
-|     + Intent Inferrer         |  Multi-signal heuristic: what does this repo DO?
+|  ContextBuilder               |  build_from_repo(repo_dir, max_files=150)
+|  .build_from_repo()           |  Walks all source files (.py .ts .go .rs .yaml …)
+|                               |  Full file contents — no diff hunks
 +-------------+----------------+
               |
               v
 +------------------------------+
-|     Skills (pre-compute)      |  Data flow tracing, git archeology, config analysis,
-|                               |  dependency analysis, test coverage, code navigation
+|     Intent Inferrer           |  Multi-signal heuristic: what does this repo DO?
 +-------------+----------------+
               |
               v
 +------------------------------+
-|  Independent Agent Reviews    |  3 agents each do a FULL independent security review
-|  +--------++--------++--------+
-|  | Claude || Codex  || Gemini |  Each reads code + skills context, identifies issues
-|  +--------++--------++--------+
+|     Skills (pre-compute)      |  Data flow tracing, git blame, config risks,
+|                               |  dependency analysis, test gaps, code navigation
++-------------+----------------+
+              |
+              v
++------------------------------+
+|  Independent Agent Reviews    |  CODE_REVIEW_SYSTEM_PROMPT
+|  +--------++--------++--------+  "audit the codebase" — not "review a PR"
+|  | Claude || Codex  || Gemini |  Agents trace data flows end-to-end across all files
+|  +--------++--------++--------+  build_code_review_prompt() — full files, no diff section
 +-------------+----------------+
               |
               v
@@ -56,7 +72,65 @@ PR Input (GitHub API or local diff/patch)
               |
               v
 +------------------------------+
-|    Output / Reports           |  Markdown PR comment, JSON, SARIF, CI gating
+|    Output / Reports           |  Markdown, JSON, SARIF, CI gating
++------------------------------+
+```
+
+---
+
+### PR Review Pipeline
+
+Reviews a GitHub pull request — what changed and what security implications those changes introduce.
+
+```
+crossfire analyze-pr --repo owner/repo --pr 123
+        |
+        v
++------------------------------+
+|  GitHub API                   |  PR metadata, diff, file contents (head+base),
+|  integrations/github/         |  commits, README, repo info, manifest files
++-------------+----------------+
+              |
+              v
++------------------------------+
+|     Context Builder           |  parse_diff() + file enrichment + imports + blame
+|     + Intent Inferrer         |  Multi-signal heuristic: what does this repo DO?
++-------------+----------------+
+              |
+              v
++------------------------------+
+|     Skills (pre-compute)      |  Data flow tracing, git archeology, config analysis,
+|                               |  dependency analysis, test coverage, code navigation
++-------------+----------------+
+              |
+              v
++------------------------------+
+|  Independent Agent Reviews    |  REVIEW_SYSTEM_PROMPT — "review this PR"
+|  +--------++--------++--------+  build_review_prompt() — diff hunks + full changed files
+|  | Claude || Codex  || Gemini |
+|  +--------++--------++--------+
++-------------+----------------+
+              |
+              v
++------------------------------+
+|   Finding Synthesizer         |  Cluster, dedupe, purpose-aware adjustments
++-------------+----------------+
+              |
+              v
++--------------------------------------+
+|   Adversarial Debate (per finding)    |
+|   (2-round, judge-led)                |
++-------------+------------------------+
+              |
+              v
++------------------------------+
+|   Policy Engine               |  Suppressions
++------------------------------+
+              |
+              v
++------------------------------+
+|    Output / Reports + GitHub  |  Markdown, JSON, SARIF, optional PR comment
+|    PR comment (--post-comment)|
 +------------------------------+
 ```
 
@@ -142,16 +216,16 @@ crossfire scan . --base main --head feature
 
 | Component | File | Purpose (from code) | Status | Internal Dependencies |
 |-----------|------|---------------------|--------|-----------------------|
-| **CLI Entry Point** | `crossfire/cli.py` | Typer app with 8 commands: `analyze-pr`, `analyze-diff`, `baseline`, `scan`, `report`, `init`, `config-check`, `demo`. `baseline` builds `.crossfire/baseline/`. `scan` supports 6 input modes, auto-builds baseline, and prints delta summary. | ✅ IMPLEMENTED | `config.settings`, `core.orchestrator`, `core.baseline`, `core.diff_resolver`, `agents.fast_model`, `core.models`, `core.severity`, `core.context_builder`, `output.*`, `integrations.github.comment_poster` |
+| **CLI Entry Point** | `crossfire/cli.py` | Typer app with 9 commands: `code-review`, `analyze-pr`, `analyze-diff`, `baseline`, `scan`, `report`, `init`, `config-check`, `demo`. `code-review` runs the whole-repo Code Review Pipeline. `baseline` builds `.crossfire/baseline/`. `scan` supports 6 input modes, auto-builds baseline, and prints delta summary. | ✅ IMPLEMENTED | `config.settings`, `core.orchestrator`, `core.baseline`, `core.diff_resolver`, `agents.fast_model`, `core.models`, `core.severity`, `core.context_builder`, `output.*`, `integrations.github.comment_poster` |
 | **Default Config** | `crossfire/config/defaults.py` | `DEFAULT_CONFIG` dict — nested default values for all settings, including `fast_model` section | ✅ IMPLEMENTED | _(none)_ |
 | **Settings Loader** | `crossfire/config/settings.py` | Loads config with priority: CLI > env > YAML > defaults. Pydantic models for each config section. Added `FastModelConfig` + `fast_model` field on `CrossFireSettings` | ✅ IMPLEMENTED | `config.defaults` |
 | **Core Models** | `crossfire/core/models.py` | 25+ Pydantic v2 models: `PRContext`, `Finding`, `DebateRecord`, `CrossFireReport`, enums, etc. | ✅ IMPLEMENTED | _(none — leaf module)_ |
-| **Context Builder** | `crossfire/core/context_builder.py` | Builds `PRContext` from GitHub PRs, local diffs, staged changes, or patch files. Parses diffs, enriches with file content, imports, blame, tests | ✅ IMPLEMENTED | `config.settings.AnalysisConfig`, `core.models`, `integrations.github.pr_loader` |
+| **Context Builder** | `crossfire/core/context_builder.py` | Builds `PRContext` from 5 sources: (1) `build_from_repo()` — whole-repo walk for Code Review Pipeline, reads all source files up to `max_files`, no diff hunks; (2) GitHub PR via API; (3) local diff/patch; (4) staged changes; (5) git refs range. Shared helpers: diff parsing, file enrichment, imports, blame, test discovery. | ✅ IMPLEMENTED | `config.settings.AnalysisConfig`, `core.models`, `integrations.github.pr_loader` |
 | **Intent Inferrer** | `crossfire/core/intent_inference.py` | Multi-signal heuristic engine: README, package metadata, file structure, dependencies, security controls, PR classification | ✅ IMPLEMENTED | `config.settings.RepoConfig`, `core.models` |
 | **Finding Synthesizer** | `crossfire/core/finding_synthesizer.py` | Union-find clustering, merges, dedupes findings from multiple agents. Cross-validation boost. Purpose-aware adjustments. Debate routing tags | ✅ IMPLEMENTED | `core.models` |
 | **Policy Engine** | `crossfire/core/policy_engine.py` | Applies suppression rules (category, file pattern, title pattern) to findings | ✅ IMPLEMENTED | `core.models` |
 | **Severity Gate** | `crossfire/core/severity.py` | `should_fail_ci()` — checks if findings breach severity/confidence threshold | ✅ IMPLEMENTED | `core.models` |
-| **Orchestrator** | `crossfire/core/orchestrator.py` | Main pipeline: `analyze_pr()`, `analyze_diff()`, `_run_pipeline()`. Added `scan_with_baseline()` — uses baseline intent, context-aware prompt, delta filtering, auto-updates baseline after scan. Added `_build_scan_summary()` with delta counts. | ✅ IMPLEMENTED | `agents.debate_engine`, `agents.review_engine`, `agents.prompts.context_prompt`, `config.settings`, `core.baseline`, `core.context_builder`, `core.finding_synthesizer`, `core.intent_inference`, `core.models`, `core.policy_engine`, `skills.*` (all 6) |
+| **Orchestrator** | `crossfire/core/orchestrator.py` | Four top-level entry points: `code_review()` — whole-repo audit using `build_from_repo()` + `CODE_REVIEW_SYSTEM_PROMPT`; `analyze_pr()` — GitHub PR via API; `analyze_diff()` — local diff/patch/staged; `scan_with_baseline()` — baseline-aware delta scan. Shared `_run_pipeline()`, `_run_skills()`, `_compute_overall_risk()`. `_build_scan_summary()` includes delta counts. | ✅ IMPLEMENTED | `agents.debate_engine`, `agents.review_engine`, `agents.prompts.review_prompt`, `agents.prompts.context_prompt`, `config.settings`, `core.baseline`, `core.context_builder`, `core.finding_synthesizer`, `core.intent_inference`, `core.models`, `core.policy_engine`, `skills.*` (all 6) |
 | **Baseline Manager** | `crossfire/core/baseline.py` | Reads/writes `.crossfire/baseline/`. `build()` runs `IntentInferrer` on whole repo, writes context.md + intent.json + scan_state.json + known_findings.json (PID lock prevents concurrent builds). `load()` deserializes all files. `check_intent_changed()` delegates to fast model. `update_after_scan()` persists confirmed findings. `filter_known()` splits new vs already-known. `_fingerprint()` = `sha256(category:file:title[:50])[:16]`. | ✅ IMPLEMENTED | `core.intent_inference`, `core.models`, `agents.fast_model`, `agents.prompts.context_prompt` |
 | **Diff Resolver** | `crossfire/core/diff_resolver.py` | Resolves all `crossfire scan` input modes into `DiffResult(diff_text, head_commit, base_commit, commit_range_desc)`. 6 static methods: `from_refs`, `from_range`, `from_patch`, `from_since_last_scan`, `from_since_date`, `from_last_n`. Uses `_run_git()` helper (same pattern as `context_builder.py`). | ✅ IMPLEMENTED | _(subprocess only)_ |
 | **Base Agent** | `crossfire/agents/base.py` | Abstract base with CLI + API dual-mode execution, JSON parsing, subprocess runner (with FileNotFoundError → AgentError conversion) | ✅ IMPLEMENTED | `config.settings.AgentConfig` |
@@ -163,7 +237,7 @@ crossfire scan . --base main --head feature
 | **Review Engine** | `crossfire/agents/review_engine.py` | Dispatches review prompt to all enabled agents in parallel (`asyncio.gather`), parses structured JSON responses into `AgentReview` with case-insensitive enum parsing via `_parse_enum_flexible()`. Added optional `system_prompt` param — if provided, overrides `REVIEW_SYSTEM_PROMPT`; backward compatible (None → default). | ✅ IMPLEMENTED | `agents.base`, `agents.claude_adapter`, `agents.codex_adapter`, `agents.gemini_adapter`, `agents.prompts.review_prompt`, `config.settings`, `core.models` |
 | **Debate Engine** | `crossfire/agents/debate_engine.py` | 2-round judge-led debate: Round 1 prosecution/defense, optional Round 2 judge-led clarification (if defense disagrees). Evidence-driven role assignment | ✅ IMPLEMENTED | `agents.base`, `agents.claude_adapter`, `agents.codex_adapter`, `agents.gemini_adapter`, `agents.consensus`, `agents.prompts.prosecutor_prompt`, `agents.prompts.defense_prompt`, `agents.prompts.judge_prompt`, `config.settings`, `core.models` |
 | **Consensus Logic** | `crossfire/agents/consensus.py` | Evidence-quality-based verdict: judge position + cross-checks + purpose-aware override + minimum evidence thresholds | ✅ IMPLEMENTED | `core.models` |
-| **Review Prompt** | `crossfire/agents/prompts/review_prompt.py` | System prompt + `build_review_prompt()` — formats all context for agent review | ✅ IMPLEMENTED | `core.models` |
+| **Review Prompt** | `crossfire/agents/prompts/review_prompt.py` | Two system prompts + two user prompt builders: `REVIEW_SYSTEM_PROMPT` + `build_review_prompt()` for PR/diff review (diff-focused); `CODE_REVIEW_SYSTEM_PROMPT` + `build_code_review_prompt()` for whole-repo audit (full-file, no diff section, "audit the codebase" framing). Both protected by `inject_guard_preamble()`. | ✅ IMPLEMENTED | `core.models`, `agents.prompts.guardrails` |
 | **Prosecutor Prompt** | `crossfire/agents/prompts/prosecutor_prompt.py` | System prompt + `build_prosecutor_prompt()` | ✅ IMPLEMENTED | _(none)_ |
 | **Defense Prompt** | `crossfire/agents/prompts/defense_prompt.py` | System prompt + `build_defense_prompt()` | ✅ IMPLEMENTED | _(none)_ |
 | **Judge Prompt** | `crossfire/agents/prompts/judge_prompt.py` | System prompt + `build_judge_prompt()` | ✅ IMPLEMENTED | _(none)_ |
@@ -190,6 +264,7 @@ crossfire scan . --base main --head feature
 ```mermaid
 flowchart TD
     subgraph CLI["cli.py — Typer Entry Point"]
+        CMD_CR["code-review"]
         CMD_PR["analyze-pr"]
         CMD_DIFF["analyze-diff"]
         CMD_BASELINE["baseline"]
@@ -206,6 +281,7 @@ flowchart TD
     end
 
     subgraph ORCHESTRATOR["core/orchestrator.py — CrossFireOrchestrator"]
+        ORCH_CR["code_review()"]
         ORCH_PR["analyze_pr()"]
         ORCH_DIFF["analyze_diff()"]
         ORCH_SCAN["scan_with_baseline()"]
@@ -245,7 +321,7 @@ flowchart TD
 
     subgraph AGENTS["Agent Reviews"]
         REVIEW["agents/review_engine.py<br/>ReviewEngine"]
-        REVIEW_PROMPT["agents/prompts/review_prompt.py<br/>build_review_prompt()"]
+        REVIEW_PROMPT["agents/prompts/review_prompt.py<br/>build_review_prompt()<br/>CODE_REVIEW_SYSTEM_PROMPT<br/>build_code_review_prompt()"]
         CLAUDE["agents/claude_adapter.py<br/>ClaudeAgent"]
         CODEX["agents/codex_adapter.py<br/>CodexAgent"]
         GEMINI["agents/gemini_adapter.py<br/>GeminiAgent"]
@@ -286,6 +362,7 @@ flowchart TD
     end
 
     %% CLI → Config
+    CMD_CR -->|"load_settings(repo_dir)"| SETTINGS
     CMD_PR -->|"load_settings(cli_overrides)"| SETTINGS
     CMD_DIFF -->|"load_settings(repo_dir, cli_overrides)"| SETTINGS
     CMD_SCAN -->|"load_settings(repo_dir, cli_overrides)"| SETTINGS
@@ -295,10 +372,23 @@ flowchart TD
     SETTINGS -->|"copy.deepcopy(DEFAULT_CONFIG)"| DEFAULTS
 
     %% CLI → Orchestrator
+    CMD_CR -->|"CrossFireOrchestrator(settings)"| ORCH_CR
     CMD_PR -->|"CrossFireOrchestrator(settings)"| ORCH_PR
     CMD_DIFF -->|"CrossFireOrchestrator(settings)"| ORCH_DIFF
     CMD_SCAN -->|"CrossFireOrchestrator(settings)"| ORCH_SCAN
     CMD_DEMO -->|"CrossFireOrchestrator(settings)"| PIPELINE
+
+    %% Code Review pipeline
+    ORCH_CR -->|"build_from_repo(repo_dir, max_files)"| CTX
+    ORCH_CR -->|"infer(context) → IntentProfile"| INFERRER
+    ORCH_CR -->|"_run_skills(context, intent, repo_dir)"| SKILL_RUN
+    ORCH_CR -->|"build_code_review_prompt() + CODE_REVIEW_SYSTEM_PROMPT"| REVIEW_PROMPT
+    ORCH_CR -->|"asyncio.gather(*agents)"| CLAUDE
+    ORCH_CR -->|"asyncio.gather(*agents)"| CODEX
+    ORCH_CR -->|"asyncio.gather(*agents)"| GEMINI
+    ORCH_CR -->|"synthesize(reviews, intent)"| SYNTH
+    ORCH_CR -->|"debate_all(findings, ctx, intent)"| DEBATE_ENG
+    ORCH_CR -->|"policy_engine.apply(findings)"| POLICY_ENG
 
     %% CLI → Baseline system
     CMD_BASELINE -->|"BaselineManager(repo_dir).build()"| BASELINE_MGR
@@ -1097,6 +1187,7 @@ SYNC WORLD:
   └─ agents/prompts/* — all sync (string building)
 
 ASYNC BOUNDARY (asyncio.run() calls):
+  ├─ cli.py     asyncio.run(orchestrator.code_review(...))          [code-review command]
   ├─ cli.py     asyncio.run(orchestrator.analyze_pr(...))           [analyze-pr command]
   ├─ cli.py     asyncio.run(orchestrator.analyze_diff(...))         [analyze-diff command]
   ├─ cli.py     asyncio.run(orchestrator.scan_with_baseline(...))   [scan command]
@@ -1106,6 +1197,9 @@ ASYNC BOUNDARY (asyncio.run() calls):
 
 ASYNC WORLD:
   ├─ core/orchestrator.py
+  │   ├─ code_review() — async
+  │   │   └─ _run_skills() offloaded via asyncio.to_thread()
+  │   │      build_from_repo() is sync (os.walk, file reads)
   │   ├─ analyze_pr() — async
   │   ├─ analyze_diff() — async
   │   ├─ scan_with_baseline() — async

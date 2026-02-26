@@ -491,6 +491,23 @@ def _get_directory_structure(repo_dir: str, max_depth: int = 4) -> str:
 # ---------------------------------------------------------------------------
 
 
+# Source file extensions to include in a whole-repo scan
+REPO_SCAN_EXTENSIONS: frozenset[str] = frozenset({
+    ".py", ".js", ".ts", ".tsx", ".jsx",
+    ".go", ".rs", ".rb", ".java", ".kt", ".cs",
+    ".cpp", ".c", ".h", ".hpp", ".php", ".swift",
+    ".sh", ".bash", ".tf", ".sql",
+    ".yml", ".yaml", ".json", ".toml",
+})
+
+# Directories to skip during whole-repo scan
+REPO_SCAN_SKIP_DIRS: frozenset[str] = frozenset({
+    ".git", ".github", "node_modules", "__pycache__", ".venv", "venv",
+    ".tox", "dist", "build", ".pytest_cache", ".mypy_cache", ".ruff_cache",
+    "coverage", "htmlcov", ".eggs", "*.egg-info",
+})
+
+
 class ContextBuilder:
     """Builds complete PRContext for analysis."""
 
@@ -593,6 +610,114 @@ class ContextBuilder:
             pr_number=pr_number,
             token=github_token,
             config=self.config,
+        )
+
+    def build_from_repo(
+        self,
+        repo_dir: str,
+        max_files: int = 150,
+        title: str = "Whole-repo code review",
+    ) -> PRContext:
+        """Build PRContext from the entire repository — no diff, no commits.
+
+        Walks all source files in the repo, reads their content, and builds a
+        PRContext where every file is populated with full content (no diff hunks).
+        This is the foundation for the Code Review Pipeline.
+
+        Args:
+            repo_dir: Path to the repository root.
+            max_files: Maximum number of source files to include.
+            title: Title to use for the synthetic PRContext.
+        """
+        repo_dir = os.path.abspath(repo_dir)
+
+        # Walk the repo and collect source files
+        files: list[FileContext] = []
+        seen: set[str] = set()
+
+        for root, dirs, filenames in os.walk(repo_dir):
+            # Prune directories in-place so os.walk skips them
+            dirs[:] = [
+                d for d in dirs
+                if d not in REPO_SCAN_SKIP_DIRS
+                and not d.startswith(".")
+                and not d.endswith(".egg-info")
+            ]
+
+            for filename in sorted(filenames):
+                if len(files) >= max_files:
+                    break
+
+                ext = Path(filename).suffix.lower()
+                if ext not in REPO_SCAN_EXTENSIONS:
+                    continue
+
+                full_path = os.path.join(root, filename)
+                rel_path = os.path.relpath(full_path, repo_dir).replace("\\", "/")
+
+                if rel_path in seen:
+                    continue
+                seen.add(rel_path)
+
+                content = _read_file_safe(full_path)
+                if content is None:
+                    continue
+
+                language = detect_language(rel_path)
+                fc = FileContext(
+                    path=rel_path,
+                    language=language,
+                    content=content,
+                    # No diff hunks — this is a whole-file review
+                )
+
+                # Enrich with related files at configured depth
+                if self.config.context_depth in ("medium", "deep") and content:
+                    imports = _find_imports(content, rel_path, language, repo_dir)
+                    fc.related_files.extend(imports)
+
+                if self.config.context_depth == "deep":
+                    if self.config.include_test_files:
+                        fc.test_files = _find_test_files(rel_path, repo_dir)
+
+                files.append(fc)
+
+        # Load related file contents (capped)
+        loaded_related = 0
+        for fc in files:
+            for rf in fc.related_files:
+                if loaded_related >= self.config.max_related_files:
+                    break
+                rf_path = os.path.join(repo_dir, rf.path)
+                rf.content = _read_file_safe(rf_path, max_size=500_000)
+                if rf.content:
+                    loaded_related += 1
+
+        # Repo-level context
+        readme = _read_file_safe(os.path.join(repo_dir, "README.md"))
+        config_files = self._collect_configs(repo_dir)
+        ci_configs = self._collect_ci_configs(config_files)
+        directory_structure = _get_directory_structure(repo_dir)
+        repo_name = self._detect_repo_name(repo_dir)
+
+        head_sha = _run_git(["rev-parse", "HEAD"], repo_dir) or ""
+
+        logger.info(
+            "context.repo_scan_complete",
+            repo=repo_name,
+            files=len(files),
+            capped=(len(files) >= max_files),
+        )
+
+        return PRContext(
+            repo_name=repo_name,
+            pr_title=title,
+            head_sha=head_sha.strip(),
+            files=files,
+            readme_content=readme,
+            ci_config_files=ci_configs,
+            config_files=config_files,
+            directory_structure=directory_structure,
         )
 
     # --- Private helpers ---

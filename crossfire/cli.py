@@ -193,6 +193,65 @@ def analyze_diff(
 
 
 @app.command()
+def code_review(
+    repo_dir: str = typer.Argument(".", help="Path to the repository root"),
+    agents: str | None = typer.Option(None, help="Comma-separated: claude,codex,gemini"),
+    skip_debate: bool = typer.Option(False, help="Skip adversarial debate phase"),
+    max_files: int = typer.Option(150, help="Maximum number of source files to scan"),
+    format: str = typer.Option("markdown", help="Output format: markdown|json|sarif"),
+    output: str | None = typer.Option(None, help="Output file path"),
+    verbose: bool = typer.Option(False, help="Enable verbose logging"),
+    dry_run: bool = typer.Option(False, help="Show what would be analyzed without calling agents"),
+) -> None:
+    """Full codebase security audit — no diff, no PR. Scans the whole repo as-is."""
+    import asyncio
+
+    from crossfire.config.settings import ConfigError, load_settings
+    from crossfire.core.orchestrator import CrossFireOrchestrator
+
+    if verbose:
+        import logging
+        logging.basicConfig(level=logging.DEBUG)
+
+    try:
+        settings = load_settings(repo_dir=repo_dir)
+    except ConfigError as e:
+        _handle_error(str(e))
+
+    agent_list = _parse_agents_list(agents)
+    if agent_list:
+        for name in list(settings.agents.keys()):
+            if name not in agent_list:
+                settings.agents[name].enabled = False
+
+    console.print(Panel(
+        f"[bold]CrossFire Code Review[/bold]\n"
+        f"Repo: {repo_dir} | Max files: {max_files}\n"
+        f"Agents: {', '.join(n for n, c in settings.agents.items() if c.enabled)}\n"
+        f"Debate: {'skip' if skip_debate else 'enabled'}",
+        title="🔥 CrossFire",
+        border_style="red",
+    ))
+
+    if dry_run:
+        console.print("[yellow]Dry run mode — would audit the above, exiting.[/yellow]")
+        raise typer.Exit(0)
+
+    orchestrator = CrossFireOrchestrator(settings)
+    try:
+        report = asyncio.run(orchestrator.code_review(
+            repo_dir=repo_dir,
+            max_files=max_files,
+            skip_debate=skip_debate,
+        ))
+    except Exception as e:
+        _handle_error(f"Code review failed: {e}", e)
+
+    _output_report(report, format, output, False)
+    _check_severity_gate(report, settings)
+
+
+@app.command()
 def baseline(
     repo_dir: str = typer.Argument(".", help="Path to the repository root"),
     force: bool = typer.Option(False, help="Rebuild baseline even if one already exists"),

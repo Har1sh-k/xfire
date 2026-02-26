@@ -126,6 +126,153 @@ class CrossFireOrchestrator:
 
         return report
 
+    async def code_review(
+        self,
+        repo_dir: str,
+        max_files: int = 150,
+        skip_debate: bool = False,
+    ) -> CrossFireReport:
+        """Run a full codebase security audit — no diff, no PR, no commits.
+
+        Reads all source files from the repo directory, runs the full pipeline
+        (intent → skills → independent reviews → debate → policy), and returns
+        a report covering the entire codebase's security posture.
+        """
+        from crossfire.agents.prompts.review_prompt import (
+            CODE_REVIEW_SYSTEM_PROMPT,
+            build_code_review_prompt,
+        )
+
+        start_time = time.monotonic()
+
+        logger.info("pipeline.code_review_start", repo_dir=repo_dir, max_files=max_files)
+
+        # 1. Build context from whole repo (no diff)
+        context = self.context_builder.build_from_repo(repo_dir, max_files=max_files)
+
+        logger.info(
+            "pipeline.context_ready",
+            files=len(context.files),
+            repo=context.repo_name,
+        )
+
+        # 2. Intent inference
+        logger.info("pipeline.intent_inference")
+        intent = self.intent_inferrer.infer(context)
+
+        logger.info(
+            "pipeline.intent_ready",
+            purpose=intent.repo_purpose[:100],
+            capabilities=len(intent.intended_capabilities),
+            controls=len(intent.security_controls_detected),
+        )
+
+        # 3. Skills
+        logger.info("pipeline.skills_running")
+        skill_outputs = await asyncio.to_thread(
+            self._run_skills, context, intent, repo_dir
+        )
+        logger.info("pipeline.skills_complete", skills=list(skill_outputs.keys()))
+
+        # 4. Independent reviews — use CODE_REVIEW_SYSTEM_PROMPT and
+        #    build_code_review_prompt (whole-file, not diff-focused)
+        logger.info("pipeline.agent_reviews")
+
+        # Build the review prompt using the whole-repo variant
+        from crossfire.agents.base import AgentError, BaseAgent
+        from crossfire.agents.review_engine import AGENT_CLASSES, _create_agent, _parse_finding_from_raw
+
+        user_prompt = build_code_review_prompt(context, intent, skill_outputs)
+
+        agents: list[BaseAgent] = []
+        for name, config in self.settings.agents.items():
+            if config.enabled:
+                try:
+                    agents.append(_create_agent(name, config))
+                except ValueError as e:
+                    logger.warning("agent.create_failed", agent=name, error=str(e))
+
+        import time as _time
+        from crossfire.core.models import AgentReview, Finding
+
+        async def _dispatch(agent: BaseAgent) -> AgentReview | None:
+            t0 = _time.monotonic()
+            try:
+                raw = await agent.execute(
+                    prompt=user_prompt,
+                    system_prompt=CODE_REVIEW_SYSTEM_PROMPT,
+                )
+                parsed = agent.parse_json_response(raw)
+                findings: list[Finding] = []
+                for rf in parsed.get("findings", []):
+                    f = _parse_finding_from_raw(rf, agent.name)
+                    if f:
+                        findings.append(f)
+                return AgentReview(
+                    agent_name=agent.name,
+                    findings=findings,
+                    overall_risk_assessment=parsed.get("overall_risk", "unknown"),
+                    review_methodology=parsed.get("risk_summary", ""),
+                    review_duration_seconds=_time.monotonic() - t0,
+                )
+            except AgentError as e:
+                logger.error("review.agent_error", agent=agent.name, error=str(e))
+                return None
+            except Exception as e:
+                logger.error("review.unexpected_error", agent=agent.name, error=str(e))
+                return None
+
+        results = await asyncio.gather(*[_dispatch(a) for a in agents], return_exceptions=True)
+        reviews = [r for r in results if isinstance(r, AgentReview) and r is not None]
+
+        logger.info(
+            "pipeline.reviews_complete",
+            agent_count=len(reviews),
+            total_findings=sum(len(r.findings) for r in reviews),
+        )
+
+        # 5. Synthesize
+        findings = self.finding_synthesizer.synthesize(reviews, intent)
+
+        # 6. Debate
+        debates: list[DebateRecord] = []
+        if not skip_debate:
+            debate_findings = [f for f in findings if f.debate_tag == DebateTag.NEEDS_DEBATE]
+            if debate_findings:
+                from crossfire.core.finding_synthesizer import compute_debate_budget
+                budget = compute_debate_budget(
+                    sum(len(fc.content or "") // 80 for fc in context.files)
+                )
+                logger.info("pipeline.debate_starting", count=len(debate_findings), budget=budget)
+                debate_results = await self.debate_engine.debate_all(
+                    findings=debate_findings,
+                    context=context,
+                    intent=intent,
+                    debate_budget=budget,
+                )
+                debates = [dr for _, dr in debate_results]
+
+        # 7. Policy
+        findings = self.policy_engine.apply(findings)
+
+        overall_risk = self._compute_overall_risk(findings)
+        summary = self._build_summary(findings, reviews, debates)
+
+        report = CrossFireReport(
+            repo_name=context.repo_name,
+            pr_title=context.pr_title,
+            context=context,
+            intent=intent,
+            agent_reviews=reviews,
+            findings=findings,
+            debates=debates,
+            overall_risk=overall_risk,
+            summary=summary,
+            agents_used=[r.agent_name for r in reviews],
+            review_duration_seconds=time.monotonic() - start_time,
+        )
+        return report
+
     async def scan_with_baseline(
         self,
         repo_dir: str,
