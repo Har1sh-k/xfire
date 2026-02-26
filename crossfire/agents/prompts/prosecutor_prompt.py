@@ -1,6 +1,12 @@
 """Prosecution prompts for the adversarial debate."""
 
-PROSECUTOR_SYSTEM_PROMPT = """You are the prosecutor in a security review debate. Your job is to argue \
+from crossfire.agents.prompts.guardrails import (
+    inject_guard_preamble,
+    wrap_agent_output,
+    wrap_external,
+)
+
+_PROSECUTOR_SYSTEM_PROMPT = """You are the prosecutor in a security review debate. Your job is to argue \
 why a suspected finding represents a REAL security risk or dangerous bug.
 
 Rules:
@@ -24,6 +30,8 @@ Output JSON:
 }
 """
 
+PROSECUTOR_SYSTEM_PROMPT = inject_guard_preamble(_PROSECUTOR_SYSTEM_PROMPT)
+
 
 def build_prosecutor_prompt(
     finding_summary: str,
@@ -32,22 +40,15 @@ def build_prosecutor_prompt(
     intent_summary: str,
 ) -> str:
     """Build the prosecution prompt for a specific finding."""
-    return f"""## Finding Under Review
-
-{finding_summary}
-
-## Evidence Collected
-
-{evidence_text}
-
-## PR Context
-
-{context_summary}
-
-## Repository Intent Profile
-
-{intent_summary}
-
-Now argue your case. Cite specific code as evidence. Explain the attack/failure path. \
-Address whether this is truly unintended or just a flagged intended capability.
-"""
+    return (
+        f"## Finding Under Review\n\n"
+        f"{wrap_agent_output(finding_summary, 'review-agent')}\n\n"
+        f"## Evidence Collected\n\n"
+        f"{wrap_external(evidence_text, 'code-evidence')}\n\n"
+        f"## PR Context\n\n"
+        f"{wrap_external(context_summary, 'pr-context')}\n\n"
+        f"## Repository Intent Profile\n\n"
+        f"{wrap_agent_output(intent_summary, 'intent-inference')}\n\n"
+        f"Now argue your case. Cite specific code as evidence. Explain the attack/failure path. "
+        f"Address whether this is truly unintended or just a flagged intended capability."
+    )

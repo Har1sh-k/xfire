@@ -1,6 +1,12 @@
 """Defense prompts for the adversarial debate."""
 
-DEFENSE_SYSTEM_PROMPT = """You are the defense attorney in a security review debate. Your job is to argue \
+from crossfire.agents.prompts.guardrails import (
+    inject_guard_preamble,
+    wrap_agent_output,
+    wrap_external,
+)
+
+_DEFENSE_SYSTEM_PROMPT = """You are the defense attorney in a security review debate. Your job is to argue \
 why a suspected finding is a FALSE POSITIVE, intended behavior, or adequately mitigated.
 
 Rules:
@@ -24,6 +30,8 @@ Output JSON:
 }
 """
 
+DEFENSE_SYSTEM_PROMPT = inject_guard_preamble(_DEFENSE_SYSTEM_PROMPT)
+
 
 def build_defense_prompt(
     finding_summary: str,
@@ -33,27 +41,18 @@ def build_defense_prompt(
     intent_summary: str,
 ) -> str:
     """Build the defense prompt for a specific finding."""
-    return f"""## Finding Under Review
-
-{finding_summary}
-
-## Evidence Collected
-
-{evidence_text}
-
-## Prosecutor's Argument
-
-{prosecutor_argument}
-
-## PR Context
-
-{context_summary}
-
-## Repository Intent Profile
-
-{intent_summary}
-
-Now present your defense. Address the prosecutor's specific claims. \
-Cite code showing controls, intended behavior, or context they missed. \
-If the finding is genuinely real, acknowledge it honestly.
-"""
+    return (
+        f"## Finding Under Review\n\n"
+        f"{wrap_agent_output(finding_summary, 'review-agent')}\n\n"
+        f"## Evidence Collected\n\n"
+        f"{wrap_external(evidence_text, 'code-evidence')}\n\n"
+        f"## Prosecutor's Argument\n\n"
+        f"{wrap_agent_output(prosecutor_argument, 'prosecutor')}\n\n"
+        f"## PR Context\n\n"
+        f"{wrap_external(context_summary, 'pr-context')}\n\n"
+        f"## Repository Intent Profile\n\n"
+        f"{wrap_agent_output(intent_summary, 'intent-inference')}\n\n"
+        f"Now present your defense. Address the prosecutor's specific claims. "
+        f"Cite code showing controls, intended behavior, or context they missed. "
+        f"If the finding is genuinely real, acknowledge it honestly."
+    )

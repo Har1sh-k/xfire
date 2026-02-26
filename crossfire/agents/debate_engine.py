@@ -9,6 +9,7 @@ from crossfire.agents.claude_adapter import ClaudeAgent
 from crossfire.agents.codex_adapter import CodexAgent
 from crossfire.agents.consensus import compute_consensus
 from crossfire.agents.gemini_adapter import GeminiAgent
+from crossfire.agents.prompts.guardrails import wrap_agent_output, wrap_external
 from crossfire.agents.prompts.defense_prompt import (
     DEFENSE_SYSTEM_PROMPT,
     build_defense_prompt,
@@ -69,7 +70,9 @@ def _format_evidence_text(finding: Finding) -> str:
         if ev.file_path:
             parts.append(f"  File: {ev.file_path}")
         if ev.code_snippet:
-            parts.append(f"  Code: {ev.code_snippet}")
+            parts.append(
+                f"  Code: {wrap_external(ev.code_snippet, 'code-snippet')}"
+            )
     return "\n".join(parts) if parts else "No evidence collected."
 
 
@@ -611,8 +614,8 @@ class DebateEngine:
 
         system = PROSECUTOR_SYSTEM_PROMPT if role == "prosecutor" else DEFENSE_SYSTEM_PROMPT
         prompt = (
-            f"## Finding Under Review\n\n{finding_summary}\n\n"
-            f"## Judge's Questions for You ({role.title()})\n\n{judge_questions}\n\n"
+            f"## Finding Under Review\n\n{wrap_agent_output(finding_summary, 'review-agent')}\n\n"
+            f"## Judge's Questions for You ({role.title()})\n\n{wrap_agent_output(judge_questions, 'judge')}\n\n"
             f"Answer the judge's specific questions. Cite code evidence. "
             f"Be concise and directly address each question."
         )

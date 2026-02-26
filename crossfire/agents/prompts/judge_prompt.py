@@ -1,6 +1,8 @@
 """Judge prompts for the adversarial debate."""
 
-JUDGE_SYSTEM_PROMPT = """You are the judge in a security review debate. You have seen the prosecution \
+from crossfire.agents.prompts.guardrails import inject_guard_preamble, wrap_agent_output
+
+_JUDGE_SYSTEM_PROMPT = """You are the judge in a security review debate. You have seen the prosecution \
 and defense arguments for a suspected security finding.
 
 Your job:
@@ -35,8 +37,9 @@ Output JSON:
 }
 """
 
+JUDGE_SYSTEM_PROMPT = inject_guard_preamble(_JUDGE_SYSTEM_PROMPT)
 
-JUDGE_CLARIFICATION_SYSTEM_PROMPT = """You are the judge in a security review debate. \
+_JUDGE_CLARIFICATION_SYSTEM_PROMPT = """You are the judge in a security review debate. \
 The prosecution and defense disagree. Your job in this round is to identify the specific \
 point of disagreement and ask targeted clarifying questions to BOTH sides.
 
@@ -54,6 +57,8 @@ Output JSON:
 }
 """
 
+JUDGE_CLARIFICATION_SYSTEM_PROMPT = inject_guard_preamble(_JUDGE_CLARIFICATION_SYSTEM_PROMPT)
+
 
 def build_judge_prompt(
     finding_summary: str,
@@ -64,15 +69,15 @@ def build_judge_prompt(
 ) -> str:
     """Build the judge prompt for a specific finding."""
     parts = [
-        f"## Finding Under Review\n\n{finding_summary}",
-        f"## Prosecutor's Argument\n\n{prosecutor_argument}",
-        f"## Defense's Argument\n\n{defense_argument}",
+        f"## Finding Under Review\n\n{wrap_agent_output(finding_summary, 'review-agent')}",
+        f"## Prosecutor's Argument\n\n{wrap_agent_output(prosecutor_argument, 'prosecutor')}",
+        f"## Defense's Argument\n\n{wrap_agent_output(defense_argument, 'defense')}",
     ]
 
     if rebuttal_argument:
-        parts.append(f"## Additional Arguments\n\n{rebuttal_argument}")
+        parts.append(f"## Additional Arguments\n\n{wrap_agent_output(rebuttal_argument, 'rebuttal')}")
 
-    parts.append(f"## Repository Intent Profile\n\n{intent_summary}")
+    parts.append(f"## Repository Intent Profile\n\n{wrap_agent_output(intent_summary, 'intent-inference')}")
     parts.append(
         "Now make your ruling. Evaluate evidence quality from both sides. "
         "Reference specific arguments and code citations. "
@@ -90,10 +95,10 @@ def build_judge_clarification_prompt(
 ) -> str:
     """Build the judge's round 2 clarification prompt."""
     return (
-        f"## Finding Under Review\n\n{finding_summary}\n\n"
-        f"## Prosecutor's Argument (Round 1)\n\n{prosecutor_argument}\n\n"
-        f"## Defense's Argument (Round 1)\n\n{defense_argument}\n\n"
-        f"## Repository Intent Profile\n\n{intent_summary}\n\n"
+        f"## Finding Under Review\n\n{wrap_agent_output(finding_summary, 'review-agent')}\n\n"
+        f"## Prosecutor's Argument (Round 1)\n\n{wrap_agent_output(prosecutor_argument, 'prosecutor')}\n\n"
+        f"## Defense's Argument (Round 1)\n\n{wrap_agent_output(defense_argument, 'defense')}\n\n"
+        f"## Repository Intent Profile\n\n{wrap_agent_output(intent_summary, 'intent-inference')}\n\n"
         "The prosecution and defense disagree. Identify the core point of contention "
         "and ask targeted clarifying questions to both sides. These questions should "
         "focus on evidence that would change your ruling."
@@ -111,13 +116,13 @@ def build_judge_final_prompt(
 ) -> str:
     """Build the judge's final ruling prompt after round 2 responses."""
     return (
-        f"## Finding Under Review\n\n{finding_summary}\n\n"
-        f"## Round 1 — Prosecutor\n\n{prosecutor_argument}\n\n"
-        f"## Round 1 — Defense\n\n{defense_argument}\n\n"
-        f"## Your Clarifying Questions\n\n{judge_questions}\n\n"
-        f"## Round 2 — Prosecutor's Response\n\n{prosecution_response}\n\n"
-        f"## Round 2 — Defense's Response\n\n{defense_response}\n\n"
-        f"## Repository Intent Profile\n\n{intent_summary}\n\n"
+        f"## Finding Under Review\n\n{wrap_agent_output(finding_summary, 'review-agent')}\n\n"
+        f"## Round 1 — Prosecutor\n\n{wrap_agent_output(prosecutor_argument, 'prosecutor')}\n\n"
+        f"## Round 1 — Defense\n\n{wrap_agent_output(defense_argument, 'defense')}\n\n"
+        f"## Your Clarifying Questions\n\n{wrap_agent_output(judge_questions, 'judge')}\n\n"
+        f"## Round 2 — Prosecutor's Response\n\n{wrap_agent_output(prosecution_response, 'prosecutor')}\n\n"
+        f"## Round 2 — Defense's Response\n\n{wrap_agent_output(defense_response, 'defense')}\n\n"
+        f"## Repository Intent Profile\n\n{wrap_agent_output(intent_summary, 'intent-inference')}\n\n"
         "Now make your final ruling. You have heard both rounds. "
         "Evaluate the evidence quality and how each side responded to your questions. "
         "Be fair, thorough, and evidence-driven."

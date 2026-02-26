@@ -3,6 +3,11 @@
 from __future__ import annotations
 
 from crossfire.core.models import IntentProfile, PRContext
+from crossfire.agents.prompts.guardrails import (
+    inject_guard_preamble,
+    wrap_agent_output,
+    wrap_external,
+)
 
 REVIEW_SYSTEM_PROMPT = """You are an elite security engineer performing a thorough code review of a pull request.
 
@@ -118,6 +123,8 @@ If you are uncertain about a finding, include it with lower confidence rather th
 Every finding MUST have specific code citations. No finding is valid without pointing to exact files and lines.
 """
 
+REVIEW_SYSTEM_PROMPT = inject_guard_preamble(REVIEW_SYSTEM_PROMPT)
+
 
 def _format_diffs(context: PRContext) -> str:
     """Format all diff hunks for the prompt."""
@@ -166,6 +173,33 @@ def _format_related_files(context: PRContext) -> str:
     return "\n".join(parts) if parts else "No related files available."
 
 
+def _format_intent_section(intent: IntentProfile) -> str:
+    """Format the full intent profile into a single block for wrapping."""
+    parts: list[str] = []
+    parts.append(f"Repository Purpose: {intent.repo_purpose}")
+
+    if intent.intended_capabilities:
+        caps = "\n".join(f"- {cap}" for cap in intent.intended_capabilities)
+        parts.append(f"\nIntended Capabilities:\n{caps}")
+
+    if intent.security_controls_detected:
+        ctrls = "\n".join(
+            f"- {ctrl.control_type}: {ctrl.description} ({ctrl.location})"
+            for ctrl in intent.security_controls_detected
+        )
+        parts.append(f"\nSecurity Controls Detected:\n{ctrls}")
+
+    if intent.trust_boundaries:
+        tbs = "\n".join(
+            f"- {tb.name}: {tb.description}" for tb in intent.trust_boundaries
+        )
+        parts.append(f"\nTrust Boundaries:\n{tbs}")
+
+    parts.append(f"\nPR Intent Classification: {intent.pr_intent}")
+    parts.append(f"\nRisk Surface Change: {intent.risk_surface_change}")
+    return "\n".join(parts)
+
+
 def build_review_prompt(
     context: PRContext,
     intent: IntentProfile,
@@ -176,45 +210,52 @@ def build_review_prompt(
 
     sections.append(f"## Repository: {context.repo_name}")
     if context.pr_number:
-        sections.append(f"## PR #{context.pr_number}: {context.pr_title}")
+        sections.append(
+            f"## PR #{context.pr_number}: "
+            + wrap_external(context.pr_title, "pr-title")
+        )
     else:
-        sections.append(f"## Analysis: {context.pr_title}")
-
-    sections.append(f"\n### PR Description\n{context.pr_description or 'No description provided.'}")
-
-    sections.append(f"\n### Repository Purpose (from intent inference)\n{intent.repo_purpose}")
-
-    if intent.intended_capabilities:
-        caps = "\n".join(f"- {cap}" for cap in intent.intended_capabilities)
-        sections.append(f"\n### Intended Capabilities\n{caps}")
-
-    if intent.security_controls_detected:
-        ctrls = "\n".join(
-            f"- {ctrl.control_type}: {ctrl.description} ({ctrl.location})"
-            for ctrl in intent.security_controls_detected
+        sections.append(
+            f"## Analysis: " + wrap_external(context.pr_title, "pr-title")
         )
-        sections.append(f"\n### Security Controls Detected\n{ctrls}")
 
-    if intent.trust_boundaries:
-        tbs = "\n".join(
-            f"- {tb.name}: {tb.description}" for tb in intent.trust_boundaries
-        )
-        sections.append(f"\n### Trust Boundaries\n{tbs}")
+    sections.append(
+        "\n### PR Description\n"
+        + wrap_external(context.pr_description or "No description provided.", "pr-description")
+    )
 
-    sections.append(f"\n### PR Intent Classification\n{intent.pr_intent}")
-    sections.append(f"\n### Risk Surface Change\n{intent.risk_surface_change}")
+    # Intent profile is LLM-generated — wrap as agent output
+    sections.append(
+        "\n### Repository Intent Profile (from intent inference)\n"
+        + wrap_agent_output(_format_intent_section(intent), "intent-inference")
+    )
 
     if context.directory_structure:
-        sections.append(f"\n### Directory Structure\n```\n{context.directory_structure}\n```")
+        sections.append(
+            "\n### Directory Structure\n"
+            + wrap_external(f"```\n{context.directory_structure}\n```", "directory-structure")
+        )
 
-    sections.append(f"\n### Changed Files and Diffs\n{_format_diffs(context)}")
-    sections.append(f"\n### Full File Contents (changed files)\n{_format_full_files(context)}")
-    sections.append(f"\n### Related Files (callers, callees, imports)\n{_format_related_files(context)}")
+    sections.append(
+        "\n### Changed Files and Diffs\n"
+        + wrap_external(_format_diffs(context), "pr-diffs")
+    )
+    sections.append(
+        "\n### Full File Contents (changed files)\n"
+        + wrap_external(_format_full_files(context), "pr-files")
+    )
+    sections.append(
+        "\n### Related Files (callers, callees, imports)\n"
+        + wrap_external(_format_related_files(context), "related-files")
+    )
 
-    # Skill outputs
+    # Skill outputs are generated by tools that analyze external code
     for skill_name, output in skill_outputs.items():
         label = skill_name.replace("_", " ").title()
-        sections.append(f"\n### {label}\n{output}")
+        sections.append(
+            f"\n### {label}\n"
+            + wrap_external(output, f"skill-{skill_name}")
+        )
 
     sections.append(
         "\nNow perform your security review. Be thorough but precise. "
