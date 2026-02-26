@@ -6,6 +6,10 @@
 
 ## Pipeline Overview
 
+CrossFire has two operating modes: **stateless review** (`analyze-pr`, `analyze-diff`) and **baseline-aware scan** (`scan`).
+
+### Stateless Review Pipeline
+
 ```
 PR Input (GitHub API or local diff/patch)
         |
@@ -56,27 +60,107 @@ PR Input (GitHub API or local diff/patch)
 +------------------------------+
 ```
 
+### Baseline-Aware Scan Pipeline
+
+```
+crossfire scan . --base main --head feature
+        |
+        v
++------------------------------+
+|     DiffResolver              |  Resolves input mode → DiffResult(diff, head, base)
+|     (6 modes)                 |  from_refs, from_range, from_patch, from_since_last_scan,
++-------------+----------------+  from_since_date, from_last_n
+              |
+              v
++---------------------------------------------+
+|     BaselineManager                          |
+|     .crossfire/baseline/ exists?              |
+|       NO  → IntentInferrer on whole repo      |  builds context.md + intent.json
+|       YES → FastModel intent-change check     |  if changed → rebuild baseline
++-------------+-------------------------------+
+              |
+              v
++------------------------------+
+|     FastModel                 |  claude-haiku-4-5 via API (CLI fallback)
+|     build_context_prompt()    |  adapts AUDIT_TEMPLATE to this repo's exact
++-------------+----------------+  capabilities + trust boundaries
+              |
+              v
++------------------------------+
+|     Context Builder           |  Same diff enrichment as stateless mode
++-------------+----------------+  (no intent re-inference — uses baseline.intent)
+              |
+              v
++------------------------------+
+|     Skills (pre-compute)      |  Same as stateless pipeline
++-------------+----------------+
+              |
+              v
++------------------------------+
+|  Independent Agent Reviews    |  system_prompt = repo-specific context prompt
+|  (with context_system_prompt) |  (not generic REVIEW_SYSTEM_PROMPT)
++-------------+----------------+
+              |
+              v
++------------------------------+
+|   Finding Synthesizer         |  Same as stateless pipeline
++-------------+----------------+
+              |
+              v
++------------------------------+
+|   baseline.filter_known()     |  Delta scanning: split new vs already-confirmed
+|                               |  fingerprint = sha256(category:file:title[:50])[:16]
++-------------+----------------+
+              |
+              v
++--------------------------------------+
+|   Adversarial Debate                  |  Only new_findings enter debate
+|   (new findings only)                 |
++-------------+------------------------+
+              |
+              v
++------------------------------+
+|   Policy Engine               |  Same as stateless pipeline
++-------------+----------------+
+              |
+              v
++------------------------------+
+|   baseline.update_after_scan()|  [AUTO] persists confirmed findings to
+|   → scan_state.json           |  known_findings.json for future delta scans
+|   → known_findings.json       |
++-------------+----------------+
+              |
+              v
++------------------------------+
+|    Output / Reports           |  Summary: "X new | Y known skipped"
++------------------------------+
+```
+
 ---
 
 ## 1. Component Inventory
 
 | Component | File | Purpose (from code) | Status | Internal Dependencies |
 |-----------|------|---------------------|--------|-----------------------|
-| **CLI Entry Point** | `crossfire/cli.py` | Typer app with 6 commands: `analyze-pr`, `analyze-diff`, `report`, `init`, `config-check`, `demo`. Error handler uses `NoReturn` type. Modern `str | None` union syntax | ✅ IMPLEMENTED | `config.settings`, `core.orchestrator`, `core.models`, `core.severity`, `core.context_builder`, `output.*`, `integrations.github.comment_poster` |
-| **Default Config** | `crossfire/config/defaults.py` | `DEFAULT_CONFIG` dict — nested default values for all settings | ✅ IMPLEMENTED | _(none)_ |
-| **Settings Loader** | `crossfire/config/settings.py` | Loads config with priority: CLI > env > YAML > defaults. Pydantic models for each config section | ✅ IMPLEMENTED | `config.defaults` |
+| **CLI Entry Point** | `crossfire/cli.py` | Typer app with 8 commands: `analyze-pr`, `analyze-diff`, `baseline`, `scan`, `report`, `init`, `config-check`, `demo`. `baseline` builds `.crossfire/baseline/`. `scan` supports 6 input modes, auto-builds baseline, and prints delta summary. | ✅ IMPLEMENTED | `config.settings`, `core.orchestrator`, `core.baseline`, `core.diff_resolver`, `agents.fast_model`, `core.models`, `core.severity`, `core.context_builder`, `output.*`, `integrations.github.comment_poster` |
+| **Default Config** | `crossfire/config/defaults.py` | `DEFAULT_CONFIG` dict — nested default values for all settings, including `fast_model` section | ✅ IMPLEMENTED | _(none)_ |
+| **Settings Loader** | `crossfire/config/settings.py` | Loads config with priority: CLI > env > YAML > defaults. Pydantic models for each config section. Added `FastModelConfig` + `fast_model` field on `CrossFireSettings` | ✅ IMPLEMENTED | `config.defaults` |
 | **Core Models** | `crossfire/core/models.py` | 25+ Pydantic v2 models: `PRContext`, `Finding`, `DebateRecord`, `CrossFireReport`, enums, etc. | ✅ IMPLEMENTED | _(none — leaf module)_ |
 | **Context Builder** | `crossfire/core/context_builder.py` | Builds `PRContext` from GitHub PRs, local diffs, staged changes, or patch files. Parses diffs, enriches with file content, imports, blame, tests | ✅ IMPLEMENTED | `config.settings.AnalysisConfig`, `core.models`, `integrations.github.pr_loader` |
 | **Intent Inferrer** | `crossfire/core/intent_inference.py` | Multi-signal heuristic engine: README, package metadata, file structure, dependencies, security controls, PR classification | ✅ IMPLEMENTED | `config.settings.RepoConfig`, `core.models` |
 | **Finding Synthesizer** | `crossfire/core/finding_synthesizer.py` | Union-find clustering, merges, dedupes findings from multiple agents. Cross-validation boost. Purpose-aware adjustments. Debate routing tags | ✅ IMPLEMENTED | `core.models` |
 | **Policy Engine** | `crossfire/core/policy_engine.py` | Applies suppression rules (category, file pattern, title pattern) to findings | ✅ IMPLEMENTED | `core.models` |
 | **Severity Gate** | `crossfire/core/severity.py` | `should_fail_ci()` — checks if findings breach severity/confidence threshold | ✅ IMPLEMENTED | `core.models` |
-| **Orchestrator** | `crossfire/core/orchestrator.py` | Main pipeline: context → intent → skills → reviews → synthesis → debate → policy → report | ✅ IMPLEMENTED | `agents.debate_engine`, `agents.review_engine`, `config.settings`, `core.context_builder`, `core.finding_synthesizer`, `core.intent_inference`, `core.models`, `core.policy_engine`, `skills.*` (all 6) |
+| **Orchestrator** | `crossfire/core/orchestrator.py` | Main pipeline: `analyze_pr()`, `analyze_diff()`, `_run_pipeline()`. Added `scan_with_baseline()` — uses baseline intent, context-aware prompt, delta filtering, auto-updates baseline after scan. Added `_build_scan_summary()` with delta counts. | ✅ IMPLEMENTED | `agents.debate_engine`, `agents.review_engine`, `agents.prompts.context_prompt`, `config.settings`, `core.baseline`, `core.context_builder`, `core.finding_synthesizer`, `core.intent_inference`, `core.models`, `core.policy_engine`, `skills.*` (all 6) |
+| **Baseline Manager** | `crossfire/core/baseline.py` | Reads/writes `.crossfire/baseline/`. `build()` runs `IntentInferrer` on whole repo, writes context.md + intent.json + scan_state.json + known_findings.json (PID lock prevents concurrent builds). `load()` deserializes all files. `check_intent_changed()` delegates to fast model. `update_after_scan()` persists confirmed findings. `filter_known()` splits new vs already-known. `_fingerprint()` = `sha256(category:file:title[:50])[:16]`. | ✅ IMPLEMENTED | `core.intent_inference`, `core.models`, `agents.fast_model`, `agents.prompts.context_prompt` |
+| **Diff Resolver** | `crossfire/core/diff_resolver.py` | Resolves all `crossfire scan` input modes into `DiffResult(diff_text, head_commit, base_commit, commit_range_desc)`. 6 static methods: `from_refs`, `from_range`, `from_patch`, `from_since_last_scan`, `from_since_date`, `from_last_n`. Uses `_run_git()` helper (same pattern as `context_builder.py`). | ✅ IMPLEMENTED | _(subprocess only)_ |
 | **Base Agent** | `crossfire/agents/base.py` | Abstract base with CLI + API dual-mode execution, JSON parsing, subprocess runner (with FileNotFoundError → AgentError conversion) | ✅ IMPLEMENTED | `config.settings.AgentConfig` |
 | **Claude Adapter** | `crossfire/agents/claude_adapter.py` | CLI: `claude -p "..." --output-format json --system-prompt "..."`. API: `anthropic.AsyncAnthropic.messages.create()` with timeout | ✅ IMPLEMENTED | `agents.base` |
 | **Codex Adapter** | `crossfire/agents/codex_adapter.py` | CLI: `codex -q "{system+user prompt}"`. API: `openai.AsyncOpenAI.chat.completions.create()` with timeout | ✅ IMPLEMENTED | `agents.base` |
 | **Gemini Adapter** | `crossfire/agents/gemini_adapter.py` | CLI: `gemini "{system+user prompt}"`. API: `google.generativeai.GenerativeModel.generate_content_async()` with `asyncio.wait_for` timeout | ✅ IMPLEMENTED | `agents.base` |
-| **Review Engine** | `crossfire/agents/review_engine.py` | Dispatches review prompt to all enabled agents in parallel (`asyncio.gather`), parses structured JSON responses into `AgentReview` with case-insensitive enum parsing via `_parse_enum_flexible()` | ✅ IMPLEMENTED | `agents.base`, `agents.claude_adapter`, `agents.codex_adapter`, `agents.gemini_adapter`, `agents.prompts.review_prompt`, `config.settings`, `core.models` |
+| **Fast Model** | `crossfire/agents/fast_model.py` | Lightweight API-first, CLI-fallback model for cheap inference. `_call_api()` uses `anthropic.AsyncAnthropic` with `ANTHROPIC_API_KEY`. Falls back to `_call_cli()` (subprocess) if key missing. Used for intent-change detection and context-aware prompt generation. Raises `FastModelUnavailable` if both paths fail. | ✅ IMPLEMENTED | `config.settings.FastModelConfig` |
+| **Context Prompt** | `crossfire/agents/prompts/context_prompt.py` | `check_intent_changed()` — fast model checks if diff changes security model (returns bool). `build_context_system_prompt()` — adapts `AUDIT_TEMPLATE` to repo context using fast model. Both fall back gracefully on `FastModelUnavailable`. | ✅ IMPLEMENTED | `agents.fast_model`, `core.baseline`, `agents.prompts.review_prompt` |
+| **Review Engine** | `crossfire/agents/review_engine.py` | Dispatches review prompt to all enabled agents in parallel (`asyncio.gather`), parses structured JSON responses into `AgentReview` with case-insensitive enum parsing via `_parse_enum_flexible()`. Added optional `system_prompt` param — if provided, overrides `REVIEW_SYSTEM_PROMPT`; backward compatible (None → default). | ✅ IMPLEMENTED | `agents.base`, `agents.claude_adapter`, `agents.codex_adapter`, `agents.gemini_adapter`, `agents.prompts.review_prompt`, `config.settings`, `core.models` |
 | **Debate Engine** | `crossfire/agents/debate_engine.py` | 2-round judge-led debate: Round 1 prosecution/defense, optional Round 2 judge-led clarification (if defense disagrees). Evidence-driven role assignment | ✅ IMPLEMENTED | `agents.base`, `agents.claude_adapter`, `agents.codex_adapter`, `agents.gemini_adapter`, `agents.consensus`, `agents.prompts.prosecutor_prompt`, `agents.prompts.defense_prompt`, `agents.prompts.judge_prompt`, `config.settings`, `core.models` |
 | **Consensus Logic** | `crossfire/agents/consensus.py` | Evidence-quality-based verdict: judge position + cross-checks + purpose-aware override + minimum evidence thresholds | ✅ IMPLEMENTED | `core.models` |
 | **Review Prompt** | `crossfire/agents/prompts/review_prompt.py` | System prompt + `build_review_prompt()` — formats all context for agent review | ✅ IMPLEMENTED | `core.models` |
@@ -108,6 +192,8 @@ flowchart TD
     subgraph CLI["cli.py — Typer Entry Point"]
         CMD_PR["analyze-pr"]
         CMD_DIFF["analyze-diff"]
+        CMD_BASELINE["baseline"]
+        CMD_SCAN["scan"]
         CMD_REPORT["report"]
         CMD_INIT["init"]
         CMD_CHECK["config-check"]
@@ -122,10 +208,12 @@ flowchart TD
     subgraph ORCHESTRATOR["core/orchestrator.py — CrossFireOrchestrator"]
         ORCH_PR["analyze_pr()"]
         ORCH_DIFF["analyze_diff()"]
+        ORCH_SCAN["scan_with_baseline()"]
         PIPELINE["_run_pipeline()"]
         SKILL_RUN["_run_skills()"]
         RISK["_compute_overall_risk()"]
         SUMMARY["_build_summary()"]
+        SCAN_SUMMARY["_build_scan_summary()"]
     end
 
     subgraph CONTEXT["Context Building"]
@@ -146,6 +234,13 @@ flowchart TD
         S_DA["dependency_analysis.py<br/>DependencyAnalysisSkill"]
         S_TC["test_coverage_check.py<br/>TestCoverageCheckSkill"]
         S_CN["code_navigation.py<br/>CodeNavigationSkill"]
+    end
+
+    subgraph BASELINE_SYS["Baseline System"]
+        BASELINE_MGR["core/baseline.py<br/>BaselineManager"]
+        DIFF_RES["core/diff_resolver.py<br/>DiffResolver"]
+        FAST_MODEL["agents/fast_model.py<br/>FastModel"]
+        CTX_PROMPT["agents/prompts/context_prompt.py<br/>check_intent_changed()<br/>build_context_system_prompt()"]
     end
 
     subgraph AGENTS["Agent Reviews"]
@@ -193,6 +288,8 @@ flowchart TD
     %% CLI → Config
     CMD_PR -->|"load_settings(cli_overrides)"| SETTINGS
     CMD_DIFF -->|"load_settings(repo_dir, cli_overrides)"| SETTINGS
+    CMD_SCAN -->|"load_settings(repo_dir, cli_overrides)"| SETTINGS
+    CMD_BASELINE -->|"load_settings(repo_dir)"| SETTINGS
     CMD_CHECK -->|"load_settings(repo_dir)"| SETTINGS
     CMD_DEMO -->|"load_settings()"| SETTINGS
     SETTINGS -->|"copy.deepcopy(DEFAULT_CONFIG)"| DEFAULTS
@@ -200,7 +297,28 @@ flowchart TD
     %% CLI → Orchestrator
     CMD_PR -->|"CrossFireOrchestrator(settings)"| ORCH_PR
     CMD_DIFF -->|"CrossFireOrchestrator(settings)"| ORCH_DIFF
+    CMD_SCAN -->|"CrossFireOrchestrator(settings)"| ORCH_SCAN
     CMD_DEMO -->|"CrossFireOrchestrator(settings)"| PIPELINE
+
+    %% CLI → Baseline system
+    CMD_BASELINE -->|"BaselineManager(repo_dir).build()"| BASELINE_MGR
+    CMD_SCAN -->|"DiffResolver.<mode>(repo_dir)"| DIFF_RES
+    CMD_SCAN -->|"BaselineManager(repo_dir)"| BASELINE_MGR
+    CMD_SCAN -->|"FastModel(settings.fast_model)"| FAST_MODEL
+    BASELINE_MGR -->|"check_intent_changed(diff, fast_model)"| CTX_PROMPT
+    CTX_PROMPT -->|"fast_model.call()"| FAST_MODEL
+
+    %% scan_with_baseline pipeline
+    ORCH_SCAN -->|"build_context_system_prompt(baseline, diff)"| CTX_PROMPT
+    ORCH_SCAN -->|"build_from_diff(diff_text, repo_dir)"| CTX
+    ORCH_SCAN -->|"_run_skills(context, intent, repo_dir)"| SKILL_RUN
+    ORCH_SCAN -->|"run_independent_reviews(ctx, intent, skills, system_prompt)"| REVIEW
+    ORCH_SCAN -->|"synthesize(reviews, intent)"| SYNTH
+    ORCH_SCAN -->|"filter_known(findings, baseline)"| BASELINE_MGR
+    ORCH_SCAN -->|"debate_all(new_findings, ctx, intent)"| DEBATE_ENG
+    ORCH_SCAN -->|"policy_engine.apply(findings)"| POLICY_ENG
+    ORCH_SCAN -->|"update_after_scan(commit, confirmed)"| BASELINE_MGR
+    ORCH_SCAN -->|"_build_scan_summary()"| SCAN_SUMMARY
 
     %% Orchestrator pipeline
     ORCH_PR -->|"build_from_github_pr(repo, pr, token) → PRContext"| CTX
@@ -231,6 +349,7 @@ flowchart TD
 
     %% Review engine
     REVIEW -->|"build_review_prompt(ctx, intent, skills)"| REVIEW_PROMPT
+    REVIEW -->|"system_prompt or REVIEW_SYSTEM_PROMPT"| REVIEW_PROMPT
     REVIEW -->|"asyncio.gather(*tasks)"| CLAUDE
     REVIEW -->|"asyncio.gather(*tasks)"| CODEX
     REVIEW -->|"asyncio.gather(*tasks)"| GEMINI
@@ -930,10 +1049,22 @@ flowchart BT
     ORCH --> S_TC
     ORCH --> S_CN
 
+    %% Baseline system deps
+    ORCH --> BASELINE
+    BASELINE --> INTENT
+    BASELINE --> MODELS
+    CTX_PROMPT_DEP["agents/prompts/context_prompt.py"] --> FAST_MODEL_DEP["agents/fast_model.py"]
+    CTX_PROMPT_DEP --> REV_PROMPT
+    BASELINE --> CTX_PROMPT_DEP
+    DIFF_RES_DEP["core/diff_resolver.py"] -.-> MODELS
+
     %% L6 deps
     CLI --> ORCH
     CLI --> SETTINGS
     CLI --> MODELS
+    CLI --> BASELINE
+    CLI --> DIFF_RES_DEP
+    CLI --> FAST_MODEL_DEP
     CLI --> SEVERITY
     CLI --> MD_R
     CLI --> JSON_R
@@ -966,18 +1097,29 @@ SYNC WORLD:
   └─ agents/prompts/* — all sync (string building)
 
 ASYNC BOUNDARY (asyncio.run() calls):
-  ├─ cli.py     asyncio.run(orchestrator.analyze_pr(...))       [analyze-pr command]
-  ├─ cli.py     asyncio.run(orchestrator.analyze_diff(...))     [analyze-diff command]
-  ├─ cli.py     asyncio.run(orchestrator._run_pipeline(...))    [demo command]
-  └─ cli.py     asyncio.run(post_review_comment(...))           [inside _output_report]
+  ├─ cli.py     asyncio.run(orchestrator.analyze_pr(...))           [analyze-pr command]
+  ├─ cli.py     asyncio.run(orchestrator.analyze_diff(...))         [analyze-diff command]
+  ├─ cli.py     asyncio.run(orchestrator.scan_with_baseline(...))   [scan command]
+  ├─ cli.py     asyncio.run(mgr.check_intent_changed(...))          [scan command — intent check]
+  ├─ cli.py     asyncio.run(orchestrator._run_pipeline(...))        [demo command]
+  └─ cli.py     asyncio.run(post_review_comment(...))               [inside _output_report]
 
 ASYNC WORLD:
   ├─ core/orchestrator.py
   │   ├─ analyze_pr() — async
   │   ├─ analyze_diff() — async
+  │   ├─ scan_with_baseline() — async
   │   └─ _run_pipeline() — async
   │       └─ _run_skills() offloaded via asyncio.to_thread() — does not block event loop
   │          Skills skipped entirely when repo_dir is None (GitHub PR mode)
+
+  ├─ core/baseline.py
+  │   └─ check_intent_changed() — async (delegates to context_prompt)
+  │
+  ├─ agents/fast_model.py
+  │   ├─ call() — async
+  │   ├─ _call_api() — async (anthropic.AsyncAnthropic with asyncio.wait_for timeout)
+  │   └─ _call_cli() — async (asyncio.create_subprocess_exec)
   │
   ├─ core/context_builder.py
   │   └─ build_from_github_pr() — async
@@ -1057,6 +1199,8 @@ Loading:
 | Component | Receives Config Via | Fields Actually Read |
 |-----------|-------------------|---------------------|
 | `CrossFireOrchestrator` | Constructor: `settings: CrossFireSettings` | `settings.analysis`, `settings.repo`, `settings.agents`, `settings.debate`, `settings.skills`, `settings.suppressions` |
+| `FastModel` | Constructor: `config: FastModelConfig` | `provider`, `model`, `api_key_env`, `cli_command`, `cli_args`, `timeout` |
+| `BaselineManager` | Constructor: `repo_dir: str` | _(reads/writes `.crossfire/baseline/` directly)_ |
 | `ContextBuilder` | Constructor: `analysis_config: AnalysisConfig` | `context_depth`, `max_related_files`, `include_test_files` |
 | `IntentInferrer` | Constructor: `repo_config: RepoConfig` | `purpose`, `intended_capabilities`, `sensitive_paths` |
 | `ReviewEngine` | Constructor: `settings: CrossFireSettings` | `settings.agents` (which are enabled, their AgentConfig) |

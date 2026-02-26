@@ -10,6 +10,10 @@ It runs multiple AI agents independently, has them debate every finding, and onl
 
 ## How It Works
 
+CrossFire has two operating modes: **stateless review** (`analyze-pr`, `analyze-diff`) and **baseline-aware scan** (`scan`).
+
+### Stateless Review Pipeline
+
 ```
 PR Input (GitHub API or local diff/patch)
         |
@@ -39,6 +43,58 @@ PR Input (GitHub API or local diff/patch)
   Policy Engine  →  Output (Markdown / JSON / SARIF)
 ```
 
+### Baseline-Aware Scan Pipeline
+
+```
+crossfire scan . --base main --head feature
+        |
+        v
+  DiffResolver → diff_text, head_commit, base_commit
+        |
+        v
+  BaselineManager.exists()?
+    NO  → build baseline (IntentInferrer on whole repo)
+          write .crossfire/baseline/context.md + intent.json
+    YES → FastModel (claude-haiku-4-5): "does this diff change security model?"
+          if yes → rebuild baseline
+        |
+        v
+  baseline.load() → context.md, intent, known_findings
+        |
+        v
+  FastModel → build_context_system_prompt(baseline, diff[:2000])
+    → repo-specific system prompt (replaces generic REVIEW_SYSTEM_PROMPT)
+        |
+        v
+  ContextBuilder.build_from_diff() → PRContext
+        |
+        v
+  Skills (same as stateless pipeline)
+        |
+        v
+  ReviewEngine.run_independent_reviews(..., system_prompt=context_prompt)
+        |
+        v
+  FindingSynthesizer → merged findings
+        |
+        v
+  baseline.filter_known(findings)
+    → (new_findings, known_skipped)    ← delta scanning
+        |
+        v
+  DebateEngine on new_findings only
+        |
+        v
+  PolicyEngine.apply()
+        |
+        v
+  [AUTO] baseline.update_after_scan(commit, confirmed)
+    → scan_state.json + known_findings.json updated
+        |
+        v
+  CrossFireReport  →  "X new findings | Y known findings skipped"
+```
+
 ### Why this works
 
 - **No SAST, no rules engine** — agents read and reason, they don't pattern-match
@@ -46,6 +102,8 @@ PR Input (GitHub API or local diff/patch)
 - **Independent reviews** — agents never see each other's output during review; blind spots from one are caught by another
 - **Adversarial debate** — every finding is stress-tested before it reaches you; false positives get eliminated, not passed through
 - **Skills provide grounding** — data flow traces, git blame, dependency diffs, and config analysis give agents concrete evidence to argue from
+- **Delta scanning** — confirmed findings are fingerprinted and persisted; repeat scans only debate what's new
+- **Repo-specific prompts** — the fast model adapts the generic audit template to your repo's exact capabilities and trust boundaries
 
 ---
 
@@ -73,6 +131,8 @@ pip install -e ".[dev]"
 # Initialize config in your repo
 crossfire init
 
+# --- Stateless review (no persistence) ---
+
 # Analyze a GitHub PR
 crossfire analyze-pr --repo owner/repo --pr 123 --github-token $GITHUB_TOKEN
 
@@ -81,6 +141,28 @@ crossfire analyze-diff --patch changes.patch --repo-dir /path/to/repo
 
 # Analyze staged changes before committing
 crossfire analyze-diff --staged --repo-dir .
+
+# --- Baseline-aware scan (persistent, delta scanning) ---
+
+# Build repo baseline once (or run scan — it auto-builds)
+crossfire baseline .
+
+# Scan last 5 commits (auto-builds baseline if missing)
+crossfire scan . --last 5
+
+# Scan a branch range
+crossfire scan . --base main --head feature-branch
+
+# Scan a specific commit range
+crossfire scan . --range HEAD~3..HEAD
+
+# Scan all commits since last scan
+crossfire scan . --since-last-scan
+
+# Scan all commits since a date
+crossfire scan . --since 2026-02-01
+
+# --- Utilities ---
 
 # Check your config is valid
 crossfire config-check
@@ -152,6 +234,14 @@ severity_gate:
   min_confidence: 0.7
   require_debate: true
 
+# Fast model — used for cheap intent-change detection and context-aware prompt generation
+fast_model:
+  provider: claude
+  model: "claude-haiku-4-5-20251001"   # cheap, fast model for pre-scan checks
+  api_key_env: "ANTHROPIC_API_KEY"     # falls back to CLI if key not set
+  cli_command: "claude"
+  timeout: 60
+
 suppressions: []
 ```
 
@@ -218,7 +308,7 @@ crossfire analyze-pr --repo owner/repo --pr 123 --post-comment --github-token $G
 
 ## CI/CD Integration
 
-### GitHub Actions
+### GitHub Actions — Stateless PR Review
 
 ```yaml
 - name: CrossFire Security Review
@@ -231,6 +321,27 @@ crossfire analyze-pr --repo owner/repo --pr 123 --post-comment --github-token $G
       --format sarif \
       --output crossfire.sarif \
       --post-comment
+
+- name: Upload SARIF
+  uses: github/codeql-action/upload-sarif@v3
+  with:
+    sarif_file: crossfire.sarif
+```
+
+### GitHub Actions — Baseline-Aware Scan (recommended for main branch)
+
+```yaml
+- name: CrossFire Baseline Scan
+  env:
+    ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+  run: |
+    pip install crossfire
+    # Cache the baseline across runs
+    # (cache .crossfire/baseline/ on your runner or in a workflow artifact)
+    crossfire scan . \
+      --since-last-scan \
+      --format sarif \
+      --output crossfire.sarif
 
 - name: Upload SARIF
   uses: github/codeql-action/upload-sarif@v3
@@ -268,27 +379,36 @@ make demo
 
 ```
 crossfire/
-  cli.py                    # Typer CLI entry point (6 commands)
+  cli.py                    # Typer CLI entry point (8 commands)
   config/
     defaults.py             # Default configuration values
     settings.py             # Config loader (CLI > env > YAML > defaults)
   core/
     models.py               # All Pydantic v2 models
-    orchestrator.py         # Main pipeline
+    orchestrator.py         # Main pipeline (analyze_pr, analyze_diff, scan_with_baseline)
     context_builder.py      # Diff parsing + file enrichment
     intent_inference.py     # What does this repo do?
     finding_synthesizer.py  # Cluster + dedupe + adjust findings
     policy_engine.py        # Suppression rules
     severity.py             # CI gate logic
+    baseline.py             # BaselineManager — .crossfire/baseline/ read/write
+    diff_resolver.py        # Resolves all scan input modes → DiffResult
   agents/
     base.py                 # CLI + API dual-mode base class
     claude_adapter.py
     codex_adapter.py
     gemini_adapter.py
-    review_engine.py        # Parallel independent reviews
+    fast_model.py           # FastModel — API-first, CLI-fallback cheap inference
+    review_engine.py        # Parallel independent reviews (+ system_prompt param)
     debate_engine.py        # 2-round judge-led debate
     consensus.py            # Evidence-based verdict logic
-    prompts/                # Prompt builders for each role
+    prompts/
+      review_prompt.py      # Default review system prompt + user prompt builder
+      context_prompt.py     # Repo-specific prompt generation + intent-change check
+      prosecutor_prompt.py
+      defense_prompt.py
+      judge_prompt.py
+      guardrails.py         # Structural prompt injection protection
   skills/
     data_flow_tracing.py
     git_archeology.py
@@ -310,6 +430,12 @@ tests/
   fixtures/                 # Sample PRs for evaluation
 docs/
   architecture.md           # Detailed component inventory + wiring diagram
+.crossfire/
+  baseline/                 # Auto-created by `crossfire baseline` or `crossfire scan`
+    context.md              # Human-readable repo context
+    intent.json             # Serialized IntentProfile
+    scan_state.json         # Last scanned commit + timestamps
+    known_findings.json     # Confirmed findings from previous scans
 ```
 
 ---
