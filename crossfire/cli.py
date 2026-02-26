@@ -407,10 +407,14 @@ def scan(
     except Exception as e:
         _handle_error(f"Failed to resolve diff: {e}", e)
 
+    base_label = diff_result.base_commit[:12] if diff_result.base_commit else "unknown"
+    head_label = diff_result.head_commit[:12] if diff_result.head_commit else "unknown"
     console.print(Panel(
         f"[bold]CrossFire Scan[/bold]\n"
         f"Repo: {repo_dir} | Range: {mode_desc}\n"
+        f"Base: {base_label} → Head: {head_label} | "
         f"Diff: {diff_result.diff_text.count(chr(10))} lines\n"
+        f"Baseline built from: {base_label} (state before diff)\n"
         f"Agents: {', '.join(n for n, c in settings.agents.items() if c.enabled)}\n"
         f"Context: {settings.analysis.context_depth} | Debate: {'skip' if skip_debate else 'enabled'}",
         title="🔥 CrossFire",
@@ -431,12 +435,18 @@ def scan(
 
     baseline_obj = None
 
+    # base_commit is the "before" state — baseline should reflect the repo
+    # at that point, not whatever is currently checked out.
+    base_ref = diff_result.base_commit
+
     if not mgr.exists():
         console.print(
             "[yellow]No baseline found. Building baseline first...[/yellow]"
         )
+        if base_ref:
+            console.print(f"[dim]  Reading repo state from base commit {base_ref[:12]}[/dim]")
         try:
-            baseline_obj = mgr.build(settings=settings)
+            baseline_obj = mgr.build(settings=settings, base_ref=base_ref)
             console.print("[green]Baseline built.[/green]")
         except Exception as e:
             _handle_error(f"Baseline build failed: {e}", e)
@@ -449,10 +459,11 @@ def scan(
             )
             if intent_changed:
                 console.print(
-                    "[yellow]Diff changes repo security model — rebuilding baseline...[/yellow]"
+                    "[yellow]Diff changes repo security model — rebuilding baseline "
+                    f"from {base_ref[:12] if base_ref else 'working tree'}...[/yellow]"
                 )
                 try:
-                    baseline_obj = mgr.build(settings=settings)
+                    baseline_obj = mgr.build(settings=settings, base_ref=base_ref)
                     console.print("[green]Baseline rebuilt.[/green]")
                 except Exception as e:
                     _handle_error(f"Baseline rebuild failed: {e}", e)

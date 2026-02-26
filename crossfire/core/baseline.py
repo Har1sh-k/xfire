@@ -140,10 +140,21 @@ class BaselineManager:
         self,
         settings: CrossFireSettings | None = None,
         head_commit: str = "",
+        base_ref: str = "",
     ) -> Baseline:
-        """Build baseline from the whole-repo context and write all files.
+        """Build baseline from the repo context and write all files.
 
-        Acquires a lock file to prevent concurrent builds.
+        Args:
+            settings: CrossFire settings (for repo config overrides).
+            head_commit: The commit SHA to record as the baseline commit.
+                         Defaults to current HEAD.
+            base_ref: Git ref to read repo content FROM — the state *before*
+                      the diff being analysed. When scanning a range like
+                      main..feature, pass the base commit so the baseline
+                      reflects the repo before the changes under review.
+                      Falls back to the working tree when empty.
+
+        Acquires a PID lock file to prevent concurrent baseline rebuilds.
         """
         lock_path = self.baseline_dir / SCAN_STATE_LOCK
         self.baseline_dir.mkdir(parents=True, exist_ok=True)
@@ -151,7 +162,7 @@ class BaselineManager:
         # Write PID lock
         lock_path.write_text(str(os.getpid()))
         try:
-            return self._do_build(settings, head_commit)
+            return self._do_build(settings, head_commit, base_ref)
         finally:
             lock_path.unlink(missing_ok=True)
 
@@ -159,32 +170,55 @@ class BaselineManager:
         self,
         settings: CrossFireSettings | None = None,
         head_commit: str = "",
+        base_ref: str = "",
     ) -> Baseline:
-        """Internal build logic — runs intent inference on whole repo."""
+        """Internal build logic — runs intent inference on repo at base_ref.
+
+        When base_ref is provided, all key files (README, manifests, config)
+        are read from that git ref via `git show`, NOT from the working tree.
+        This ensures the baseline reflects the repo state *before* the diff
+        being reviewed, regardless of what is currently checked out.
+        """
         from crossfire.core.context_builder import (
-            ContextBuilder,
             _collect_config_files,
             _collect_manifest_files,
             _get_directory_structure,
+            _get_file_at_ref,
             _read_file_safe,
         )
 
-        logger.info("baseline.build.start", repo_dir=self.repo_dir)
+        logger.info(
+            "baseline.build.start",
+            repo_dir=self.repo_dir,
+            base_ref=base_ref or "(working tree)",
+        )
 
         # Resolve head commit
         if not head_commit:
-            head_commit = self._get_head_commit()
+            head_commit = base_ref or self._get_head_commit()
 
-        # Build a synthetic PRContext from the whole repo (no diff)
+        # Build a synthetic PRContext from the repo state at base_ref
         from crossfire.core.models import PRContext
 
         repo_dir = self.repo_dir
-        readme = _read_file_safe(os.path.join(repo_dir, "README.md"))
-        config_files: dict[str, str] = {}
-        config_files.update(_collect_config_files(repo_dir))
-        config_files.update(_collect_manifest_files(repo_dir))
 
-        directory_structure = _get_directory_structure(repo_dir)
+        if base_ref:
+            # Read key files at the base git ref so the baseline captures
+            # the repo BEFORE the diff, not whatever is checked out now.
+            readme = _get_file_at_ref("README.md", base_ref, repo_dir)
+
+            # Read manifest/config files from the ref using git show
+            config_files = _collect_config_files_at_ref(repo_dir, base_ref)
+
+            # Directory structure from the ref's tree
+            directory_structure = _get_directory_structure_at_ref(repo_dir, base_ref)
+        else:
+            # No ref given (e.g. crossfire baseline .) — use working tree
+            readme = _read_file_safe(os.path.join(repo_dir, "README.md"))
+            config_files = {}
+            config_files.update(_collect_config_files(repo_dir))
+            config_files.update(_collect_manifest_files(repo_dir))
+            directory_structure = _get_directory_structure(repo_dir)
 
         repo_name = Path(repo_dir).name
         context = PRContext(
@@ -228,6 +262,7 @@ class BaselineManager:
         logger.info(
             "baseline.build.complete",
             commit=head_commit,
+            base_ref=base_ref or "(working tree)",
             capabilities=len(intent.intended_capabilities),
             controls=len(intent.security_controls_detected),
         )
@@ -414,6 +449,72 @@ class BaselineManager:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _collect_config_files_at_ref(repo_dir: str, ref: str) -> dict[str, str]:
+    """Read manifest and config files from a git ref using git show.
+
+    Falls back silently for any file that doesn't exist at that ref.
+    """
+    import subprocess
+
+    from crossfire.core.context_builder import MANIFEST_FILES, SECURITY_CONFIG_PATTERNS
+
+    result: dict[str, str] = {}
+
+    # Collect all non-glob filenames to try
+    candidates: list[str] = list(MANIFEST_FILES)
+    for pattern in SECURITY_CONFIG_PATTERNS:
+        if "*" not in pattern:
+            candidates.append(pattern)
+
+    for filename in candidates:
+        try:
+            proc = subprocess.run(
+                ["git", "show", f"{ref}:{filename}"],
+                cwd=repo_dir,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if proc.returncode == 0 and proc.stdout:
+                result[filename] = proc.stdout
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            pass
+
+    return result
+
+
+def _get_directory_structure_at_ref(repo_dir: str, ref: str) -> str:
+    """Get a tree-like directory listing from a git ref via git ls-tree.
+
+    Falls back to the working tree structure if the ref is unavailable.
+    """
+    import subprocess
+
+    from crossfire.core.context_builder import _get_directory_structure
+
+    try:
+        proc = subprocess.run(
+            ["git", "ls-tree", "-r", "--name-only", ref],
+            cwd=repo_dir,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        if proc.returncode != 0 or not proc.stdout.strip():
+            return _get_directory_structure(repo_dir)
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return _get_directory_structure(repo_dir)
+
+    # Convert flat file list to a tree-like structure (first 200 entries)
+    paths = [p for p in proc.stdout.strip().splitlines() if p][:200]
+    lines: list[str] = [f"{Path(repo_dir).name}/"]
+    for path in paths:
+        parts = path.split("/")
+        indent = "  " * (len(parts) - 1)
+        lines.append(f"{indent}{'└── ' if len(parts) > 1 else '├── '}{parts[-1]}")
+    return "\n".join(lines)
 
 
 def _build_context_md(intent: IntentProfile, commit: str, date: str) -> str:
