@@ -29,6 +29,60 @@ from crossfire.auth import (
 )
 
 console = Console()
+_debug_collector: "DebugCollector | None" = None  # set by _apply_output_flags()
+
+
+def _apply_output_flags(silent: bool, debug: bool) -> "DebugCollector | None":
+    """Configure console + structlog for --silent / --debug modes.
+
+    Silent: suppresses all Rich output and structlog events.
+    Debug:  hooks a DebugCollector into structlog so every pipeline event
+            is captured; the collector is returned and must be passed to
+            write_debug_markdown() after the pipeline finishes.
+
+    Must be called early in each command, before any logger.info() or
+    console.print() calls.
+    """
+    global console
+
+    collector = None
+
+    if silent:
+        import io as _io
+        # Replace module-level console with a silent one
+        console = Console(file=_io.StringIO(), quiet=True)
+        # Silence structlog — route all output to /dev/null
+        import structlog as _sl
+        _sl.configure(
+            processors=[_sl.processors.KeyValueRenderer()],
+            wrapper_class=_sl.BoundLogger,
+            context_class=dict,
+            logger_factory=_sl.PrintLoggerFactory(file=_io.StringIO()),
+            cache_logger_on_first_use=False,
+        )
+        return None
+
+    if debug:
+        import structlog as _sl
+        from crossfire.output.debug_log import DebugCollector
+        collector = DebugCollector()
+        # Prepend capture processor before the existing rendering chain
+        _sl.configure(
+            processors=[
+                collector.processor,
+                _sl.stdlib.add_log_level,
+                _sl.processors.TimeStamper(fmt="iso"),
+                _sl.dev.ConsoleRenderer(),
+            ],
+            wrapper_class=_sl.BoundLogger,
+            context_class=dict,
+            logger_factory=_sl.PrintLoggerFactory(),
+            cache_logger_on_first_use=False,
+        )
+
+    return collector
+
+
 app = typer.Typer(
     name="crossfire",
     help="Multiple agents. One verdict. Zero blind spots.",
@@ -303,12 +357,16 @@ def analyze_pr(
     ),
     verbose: bool = typer.Option(False, help="Enable verbose logging"),
     dry_run: bool = typer.Option(False, help="Show what would be analyzed without calling agents"),
+    debug: bool = typer.Option(False, "--debug", help="Write full debug trace to crossfire-debug-TIMESTAMP.md"),
+    silent: bool = typer.Option(False, "--silent", help="Suppress all output — exit code only (for git hooks)"),
 ) -> None:
     """Analyze a GitHub pull request for security issues."""
     import asyncio
 
     from crossfire.config.settings import ConfigError, load_settings
     from crossfire.core.orchestrator import CrossFireOrchestrator
+
+    _collector = _apply_output_flags(silent=silent, debug=debug)
 
     cli_overrides: dict = {}
     if context_depth:
@@ -352,6 +410,14 @@ def analyze_pr(
     except Exception as e:
         _handle_error(f"Analysis failed: {e}", e)
 
+    if _collector is not None:
+        from crossfire.output.debug_log import write_debug_markdown
+        debug_path = write_debug_markdown(
+            report, _collector,
+            command_info={"repo": repo, "pr": pr, "agents": agents, "thinking": False},
+        )
+        console.print(f"[dim]Debug log written → {debug_path}[/dim]")
+
     _output_report(
         report, format, output, post_comment,
         repo=repo, pr_number=pr, github_token=github_token,
@@ -380,6 +446,8 @@ def analyze_diff(
     thinking: bool = typer.Option(False, "--thinking", help="Enable extended thinking/reasoning for all agents"),
     verbose: bool = typer.Option(False, help="Enable verbose logging"),
     dry_run: bool = typer.Option(False, help="Show what would be analyzed without calling agents"),
+    debug: bool = typer.Option(False, "--debug", help="Write full debug trace to crossfire-debug-TIMESTAMP.md"),
+    silent: bool = typer.Option(False, "--silent", help="Suppress all output — exit code only (for git hooks)"),
 ) -> None:
     """Analyze a local diff or staged changes.
 
@@ -397,6 +465,9 @@ def analyze_diff(
 
     from crossfire.config.settings import ConfigError, load_settings
     from crossfire.core.orchestrator import CrossFireOrchestrator
+
+    # Apply output mode flags early — before any console.print() or logger calls
+    _collector = _apply_output_flags(silent=silent, debug=debug)
 
     if not patch and not commit and not staged and not (base and head):
         _handle_error("Must specify --patch, --commit, --staged, or --base/--head.")
@@ -509,6 +580,15 @@ def analyze_diff(
         if _tmp_patch_file:
             Path(_tmp_patch_file).unlink(missing_ok=True)
 
+    if _collector is not None:
+        from crossfire.output.debug_log import write_debug_markdown
+        debug_path = write_debug_markdown(
+            report, _collector,
+            command_info={"repo-dir": repo_dir, "commit": commit, "patch": patch,
+                          "staged": staged, "agents": agents, "thinking": thinking},
+        )
+        console.print(f"[dim]Debug log written → {debug_path}[/dim]")
+
     _output_report(report, format, output, False)
 
     _check_severity_gate(report, settings)
@@ -525,12 +605,16 @@ def code_review(
     output: str | None = typer.Option(None, help="Output file path"),
     verbose: bool = typer.Option(False, help="Enable verbose logging"),
     dry_run: bool = typer.Option(False, help="Show what would be analyzed without calling agents"),
+    debug: bool = typer.Option(False, "--debug", help="Write full debug trace to crossfire-debug-TIMESTAMP.md"),
+    silent: bool = typer.Option(False, "--silent", help="Suppress all output — exit code only (for git hooks)"),
 ) -> None:
     """Full codebase security audit — no diff, no PR. Scans the whole repo as-is."""
     import asyncio
 
     from crossfire.config.settings import ConfigError, load_settings
     from crossfire.core.orchestrator import CrossFireOrchestrator
+
+    _collector = _apply_output_flags(silent=silent, debug=debug)
 
     if verbose:
         import logging
@@ -582,6 +666,15 @@ def code_review(
         ))
     except Exception as e:
         _handle_error(f"Code review failed: {e}", e)
+
+    if _collector is not None:
+        from crossfire.output.debug_log import write_debug_markdown
+        debug_path = write_debug_markdown(
+            report, _collector,
+            command_info={"repo-dir": repo_dir, "max-files": max_files,
+                          "agents": agents, "thinking": thinking},
+        )
+        console.print(f"[dim]Debug log written → {debug_path}[/dim]")
 
     _output_report(report, format, output, False)
     _check_severity_gate(report, settings)
