@@ -25,15 +25,66 @@ class CodexAgent(BaseAgent):
         system_prompt: str,
         context_files: list[str] | None,
     ) -> str:
-        """Run via Codex CLI non-interactively using ``codex exec <prompt>``.
+        """Run via Codex CLI non-interactively.
 
-        The Codex CLI is natively agentic and has its own file access.
-        It runs in the repo directory (cwd=self.repo_dir set by BaseAgent).
+        Uses the same flags as OpenClaw's DEFAULT_CODEX_BACKEND:
+          codex exec --json --color never --sandbox read-only --skip-git-repo-check <prompt>
+
+        --sandbox read-only ensures the agent can read files but cannot write,
+        which is the correct posture for a security review agent.
+        The Codex CLI is natively agentic and runs in the repo directory.
         """
         full_prompt = f"{system_prompt}\n\n{prompt}" if system_prompt else prompt
-        cmd = [self.config.cli_command, "exec", full_prompt]
+        cmd = [
+            self.config.cli_command,
+            "exec",
+            "--json",
+            "--color", "never",
+            "--sandbox", "read-only",
+            "--skip-git-repo-check",
+        ]
         cmd.extend(self.config.cli_args)
-        return await self._run_subprocess(cmd)
+        cmd.append(full_prompt)
+        raw = await self._run_subprocess(cmd)
+        # Codex outputs JSONL with --json; extract the final text message
+        return self._parse_jsonl_output(raw)
+
+    @staticmethod
+    def _parse_jsonl_output(raw: str) -> str:
+        """Extract assistant text from Codex JSONL stream output.
+
+        Each line is a JSON object. We collect all ``message`` content where
+        role is ``assistant`` and return the last non-empty text block.
+        """
+        import json as _json
+
+        texts: list[str] = []
+        for line in raw.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = _json.loads(line)
+            except _json.JSONDecodeError:
+                continue
+            # Codex JSONL format: {type: "message", role: "assistant", content: [...]}
+            if not isinstance(obj, dict):
+                continue
+            if obj.get("role") == "assistant":
+                content = obj.get("content", [])
+                if isinstance(content, list):
+                    for block in content:
+                        if isinstance(block, dict) and block.get("type") == "output_text":
+                            texts.append(block.get("text", ""))
+                elif isinstance(content, str):
+                    texts.append(content)
+            # Also handle flat {type: "output_text", text: "..."} lines
+            elif obj.get("type") == "output_text":
+                texts.append(obj.get("text", ""))
+
+        result = "\n".join(t for t in texts if t.strip()).strip()
+        # Fall back to raw output if we couldn't parse anything useful
+        return result if result else raw
 
     async def _run_api(
         self,

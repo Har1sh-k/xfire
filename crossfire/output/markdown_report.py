@@ -108,6 +108,25 @@ def generate_markdown_report(report: CrossFireReport) -> str:
         parts.append("All agents reviewed the PR and found no security issues or dangerous bugs.")
         parts.append("")
 
+    # Reasoning traces (only present when --thinking was used)
+    traces = [
+        (rev.agent_name, rev.thinking_trace)
+        for rev in report.agent_reviews
+        if rev.thinking_trace
+    ]
+    if traces:
+        parts.append("## Agent Reasoning Traces")
+        parts.append("")
+        for agent_name, trace in traces:
+            parts.append(f"<details><summary>{agent_name} reasoning ({len(trace)} chars)</summary>")
+            parts.append("")
+            parts.append("```")
+            parts.append(trace)
+            parts.append("```")
+            parts.append("")
+            parts.append("</details>")
+            parts.append("")
+
     return "\n".join(parts)
 
 

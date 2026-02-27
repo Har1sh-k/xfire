@@ -377,6 +377,7 @@ def analyze_diff(
         None, envvar="CROSSFIRE_CACHE_DIR",
         help="Cache directory for context/intent persistence across runs",
     ),
+    thinking: bool = typer.Option(False, "--thinking", help="Enable extended thinking/reasoning for all agents"),
     verbose: bool = typer.Option(False, help="Enable verbose logging"),
     dry_run: bool = typer.Option(False, help="Show what would be analyzed without calling agents"),
 ) -> None:
@@ -388,6 +389,7 @@ def analyze_diff(
       crossfire analyze-diff --patch changes.patch
       crossfire analyze-diff --commit f1877d3 --repo-dir /path/to/repo
       crossfire analyze-diff --base main --head feature-branch
+      crossfire analyze-diff --commit f1877d3 --thinking --repo-dir /path/to/repo
     """
     import asyncio
     import subprocess
@@ -461,6 +463,10 @@ def analyze_diff(
             if name not in agent_list:
                 settings.agents[name].enabled = False
 
+    if thinking:
+        for cfg in settings.agents.values():
+            cfg.enable_thinking = True
+
     if commit:
         mode = "commit:" + commit[:12]
     elif staged:
@@ -514,6 +520,7 @@ def code_review(
     agents: str | None = typer.Option(None, help="Comma-separated: claude,codex,gemini"),
     skip_debate: bool = typer.Option(False, help="Skip adversarial debate phase"),
     max_files: int = typer.Option(150, help="Maximum number of source files to scan"),
+    thinking: bool = typer.Option(False, "--thinking", help="Enable extended thinking/reasoning for all agents"),
     format: str = typer.Option("markdown", help="Output format: markdown|json|sarif"),
     output: str | None = typer.Option(None, help="Output file path"),
     verbose: bool = typer.Option(False, help="Enable verbose logging"),
@@ -539,6 +546,10 @@ def code_review(
         for name in list(settings.agents.keys()):
             if name not in agent_list:
                 settings.agents[name].enabled = False
+
+    if thinking:
+        for cfg in settings.agents.values():
+            cfg.enable_thinking = True
 
     console.print(Panel(
         f"[bold]CrossFire Code Review[/bold]\n"
