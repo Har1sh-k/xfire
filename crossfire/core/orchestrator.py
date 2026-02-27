@@ -201,7 +201,7 @@ class CrossFireOrchestrator:
         for name, config in self.settings.agents.items():
             if config.enabled:
                 try:
-                    agents.append(_create_agent(name, config))
+                    agents.append(_create_agent(name, config, repo_dir=repo_dir))
                 except ValueError as e:
                     logger.warning("agent.create_failed", agent=name, error=str(e))
 
@@ -358,7 +358,7 @@ class CrossFireOrchestrator:
         # 5. Independent reviews with context-aware system prompt
         logger.info("pipeline.agent_reviews")
         reviews = await self.review_engine.run_independent_reviews(
-            context, intent, skill_outputs, system_prompt=context_system_prompt
+            context, intent, skill_outputs, system_prompt=context_system_prompt, repo_dir=repo_dir
         )
         logger.info(
             "pipeline.reviews_complete",
@@ -515,7 +515,9 @@ class CrossFireOrchestrator:
 
         # 4. Independent agent reviews (parallel)
         logger.info("pipeline.agent_reviews")
-        reviews = await self.review_engine.run_independent_reviews(context, intent, skill_outputs)
+        reviews = await self.review_engine.run_independent_reviews(
+            context, intent, skill_outputs, repo_dir=repo_dir
+        )
         logger.info(
             "pipeline.reviews_complete",
             agent_count=len(reviews),

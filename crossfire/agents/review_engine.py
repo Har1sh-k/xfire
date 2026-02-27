@@ -55,12 +55,12 @@ AGENT_CLASSES: dict[str, type[BaseAgent]] = {
 }
 
 
-def _create_agent(name: str, config: AgentConfig) -> BaseAgent:
+def _create_agent(name: str, config: AgentConfig, repo_dir: str | None = None) -> BaseAgent:
     """Create an agent instance by name."""
     cls = AGENT_CLASSES.get(name)
     if not cls:
         raise ValueError(f"Unknown agent: {name}")
-    return cls(config)
+    return cls(config, repo_dir=repo_dir)
 
 
 def _parse_finding_from_raw(raw: dict, agent_name: str) -> Finding | None:
@@ -153,6 +153,7 @@ class ReviewEngine:
         intent: IntentProfile,
         skill_outputs: dict[str, str],
         system_prompt: str | None = None,
+        repo_dir: str | None = None,
     ) -> list[AgentReview]:
         """Run independent reviews from all enabled agents in parallel.
 
@@ -177,7 +178,7 @@ class ReviewEngine:
         for name, config in self.settings.agents.items():
             if config.enabled:
                 try:
-                    agent = _create_agent(name, config)
+                    agent = _create_agent(name, config, repo_dir=repo_dir)
                     agents.append(agent)
                 except ValueError as e:
                     logger.warning("agent.create_failed", agent=name, error=str(e))

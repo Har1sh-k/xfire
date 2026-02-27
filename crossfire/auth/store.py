@@ -131,6 +131,52 @@ def get_claude_setup_token(auth_path: Path | None = None) -> str | None:
 
 
 # ---------------------------------------------------------------------------
+# Claude — read OAuth token from ~/.claude/.credentials.json
+# ---------------------------------------------------------------------------
+
+def read_claude_cli_credentials() -> str | None:
+    """Read the Claude Code CLI OAuth access token from ~/.claude/.credentials.json.
+
+    The Claude Code CLI stores its OAuth credentials here after the first login.
+    The ``accessToken`` field has scope ``user:inference`` which allows making
+    inference calls.  We surface it so API mode can use it as a Bearer token
+    via ``anthropic.AsyncAnthropic(auth_token=...)``.
+
+    Returns the access token, or None if the file is absent / malformed / expired.
+    """
+    candidates = [
+        Path.home() / ".claude" / ".credentials.json",
+    ]
+
+    for path in candidates:
+        if not path.exists():
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+
+        if not isinstance(data, dict):
+            continue
+
+        oauth = data.get("claudeAiOauth")
+        if not isinstance(oauth, dict):
+            continue
+
+        access_token = oauth.get("accessToken")
+        if not isinstance(access_token, str) or not access_token.strip():
+            continue
+
+        expires_at = oauth.get("expiresAt")
+        if isinstance(expires_at, (int, float)) and _is_expired(int(expires_at)):
+            continue
+
+        return access_token.strip()
+
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Codex — read OPENAI_API_KEY from ~/.codex/auth.json
 # ---------------------------------------------------------------------------
 

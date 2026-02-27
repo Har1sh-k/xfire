@@ -31,8 +31,9 @@ class BaseAgent(ABC):
 
     name: str = "base"
 
-    def __init__(self, config: AgentConfig) -> None:
+    def __init__(self, config: AgentConfig, repo_dir: str | None = None) -> None:
         self.config = config
+        self.repo_dir = repo_dir
 
     async def execute(
         self,
