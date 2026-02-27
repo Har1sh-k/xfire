@@ -18,7 +18,7 @@ def _spinner() -> str:
     """Return the current braille spinner frame based on wall-clock time."""
     return _SPINNER_FRAMES[int(time.monotonic() * 8) % len(_SPINNER_FRAMES)]
 
-from rich.console import Console
+from rich.console import Console, ConsoleOptions, RenderResult
 from rich.live import Live
 from rich.text import Text
 
@@ -36,7 +36,7 @@ _LOGO_LINES = [
 ]
 
 # ---------------------------------------------------------------------------
-# Module-level banner helpers (usable without a full HackerUI instance)
+# Module-level banner helpers (usable without a full instance)
 # ---------------------------------------------------------------------------
 
 
@@ -125,6 +125,32 @@ _DEBUG_LOG_MAX = 8  # max lines shown in the live debug log section
 
 
 # ---------------------------------------------------------------------------
+# Live renderables — re-invoke _render() on every Rich refresh tick so the
+# braille spinner actually animates between structlog events.
+# ---------------------------------------------------------------------------
+
+
+class _HackerRenderable:
+    """Rich renderable that calls HackerUI._render() fresh on every refresh."""
+
+    def __init__(self, ui: "HackerUI") -> None:
+        self._ui = ui
+
+    def __rich_console__(self, console: Console, options: ConsoleOptions) -> RenderResult:
+        yield self._ui._render()
+
+
+class _AgentTestRenderable:
+    """Rich renderable that calls AgentTestUI._render() fresh on every refresh."""
+
+    def __init__(self, ui: "AgentTestUI") -> None:
+        self._ui = ui
+
+    def __rich_console__(self, console: Console, options: ConsoleOptions) -> RenderResult:
+        yield self._ui._render()
+
+
+# ---------------------------------------------------------------------------
 # HackerUI — pipeline live display
 # ---------------------------------------------------------------------------
 
@@ -185,8 +211,8 @@ class HackerUI:
 
         self._lock = threading.Lock()
         self._live = Live(
-            self._render(),
-            refresh_per_second=8,
+            _HackerRenderable(self),
+            refresh_per_second=10,
             console=self._console,
             transient=False,
         )
@@ -296,9 +322,10 @@ class HackerUI:
                 if len(self._debug_events) > _DEBUG_LOG_MAX:
                     self._debug_events.pop(0)
 
-        # Update live display
+        # Trigger an immediate refresh so phase transitions appear instantly
+        # (the renderable itself always calls _render() fresh on each tick)
         try:
-            self._live.update(self._render())
+            self._live.refresh()
         except Exception:
             pass  # Never let UI errors crash the pipeline
 
@@ -318,7 +345,7 @@ class HackerUI:
                         self._phase_elapsed[phase] = (
                             time.monotonic() - self._phase_start[phase]
                         )
-        self._live.update(self._render())
+        self._live.refresh()
         self._live.stop()
 
     # ------------------------------------------------------------------
@@ -452,8 +479,8 @@ class AgentTestUI:
         self._start: dict[str, float] = {}
         self._lock = threading.Lock()
         self._live = Live(
-            self._render(),
-            refresh_per_second=8,
+            _AgentTestRenderable(self),
+            refresh_per_second=10,
             console=self._console,
             transient=True,
         )
@@ -463,7 +490,7 @@ class AgentTestUI:
             self._status[agent] = "testing"
             self._start[agent] = time.monotonic()
         try:
-            self._live.update(self._render())
+            self._live.refresh()
         except Exception:
             pass
 
@@ -474,7 +501,7 @@ class AgentTestUI:
                 self._elapsed[agent] = time.monotonic() - self._start[agent]
             self._result[agent] = msg[:55]
         try:
-            self._live.update(self._render())
+            self._live.refresh()
         except Exception:
             pass
 
