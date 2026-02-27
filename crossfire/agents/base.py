@@ -127,6 +127,7 @@ class BaseAgent(ABC):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 env=os.environ,
+                cwd=self.repo_dir or None,
             )
             stdout, stderr = await asyncio.wait_for(
                 proc.communicate(), timeout=timeout
