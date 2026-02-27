@@ -1,4 +1,4 @@
-"""Subscription auth helpers for CrossFire."""
+"""Auth helpers for CrossFire — CLI credential readers and auth store."""
 
 from crossfire.auth.store import (
     AuthStore,
@@ -10,8 +10,8 @@ from crossfire.auth.store import (
     get_gemini_access_token,
     has_credentials_for_agent,
     load_auth_store,
-    login_codex_oauth,
-    login_gemini_oauth,
+    read_codex_cli_credentials,
+    read_gemini_cli_credentials,
     resolve_auth_path,
     save_auth_store,
     upsert_claude_setup_token,
@@ -28,8 +28,8 @@ __all__ = [
     "get_gemini_access_token",
     "has_credentials_for_agent",
     "load_auth_store",
-    "login_codex_oauth",
-    "login_gemini_oauth",
+    "read_codex_cli_credentials",
+    "read_gemini_cli_credentials",
     "resolve_auth_path",
     "save_auth_store",
     "upsert_claude_setup_token",

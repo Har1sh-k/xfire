@@ -21,11 +21,10 @@ from rich.panel import Panel
 from crossfire.auth import (
     auth_status_rows,
     has_credentials_for_agent,
-    login_codex_oauth,
-    login_gemini_oauth,
+    read_codex_cli_credentials,
+    read_gemini_cli_credentials,
     resolve_auth_path,
     upsert_claude_setup_token,
-    upsert_oauth_credential,
 )
 
 console = Console()
@@ -149,60 +148,69 @@ def auth_login(
         "-p",
         help="Provider to authenticate: codex|gemini|claude",
     ),
-    remote: bool = typer.Option(False, help="Use manual URL paste mode (remote/headless)."),
-    no_browser: bool = typer.Option(False, help="Do not auto-open browser URL."),
-    timeout: int = typer.Option(300, help="OAuth callback timeout in seconds."),
-    token: str | None = typer.Option(None, help="Claude setup-token value (optional)."),
+    token: str | None = typer.Option(None, help="Claude setup-token value (--provider claude only)."),
 ) -> None:
-    """Authenticate subscription providers without relying on provider CLIs."""
+    """Set up credentials for an agent provider.
+
+    \b
+    Claude  — paste an Anthropic setup-token (or set ANTHROPIC_API_KEY).
+    Codex   — CrossFire reads ~/.codex/auth.json automatically after you
+               log in via the Codex CLI.  Set OPENAI_API_KEY for API mode.
+    Gemini  — CrossFire reads ~/.gemini/oauth_creds.json automatically after
+               you log in via the Gemini CLI.  Set GOOGLE_API_KEY for API mode.
+    """
     provider_norm = provider.strip().lower()
     if provider_norm not in {"codex", "gemini", "claude"}:
         _handle_error("Unknown provider. Use --provider codex|gemini|claude")
 
     auth_path = resolve_auth_path()
 
-    try:
-        if provider_norm == "claude":
+    if provider_norm == "claude":
+        try:
             setup_token = token or typer.prompt("Paste Anthropic setup-token", hide_input=True)
             upsert_claude_setup_token(setup_token, auth_path=auth_path)
-            console.print("[green]Claude setup-token saved.[/green]")
+            console.print("[green]✓ Claude setup-token saved.[/green]")
+            console.print(f"[dim]Auth store: {auth_path}[/dim]")
+        except Exception as e:
+            _handle_error(f"Failed to save Claude setup-token: {e}", e)
 
-        elif provider_norm == "codex":
-            cred = login_codex_oauth(
-                is_remote=remote,
-                open_browser=not no_browser,
-                timeout_s=timeout,
-            )
-            upsert_oauth_credential("codex", cred, auth_path=auth_path)
-            console.print(f"[green]Codex OAuth saved.[/green] email={cred.email or '-'}")
-            if cred.api_key:
-                console.print("[dim]Codex OAuth exchanged to OpenAI API key for API mode use.[/dim]")
-            else:
-                console.print(
-                    "[yellow]Codex OAuth saved, but no API key exchange token was returned.[/yellow]"
-                )
-
+    elif provider_norm == "codex":
+        key = read_codex_cli_credentials()
+        if key:
+            console.print("[green]✓ Codex credentials found in ~/.codex/auth.json[/green]")
+            console.print("[dim]CrossFire will use these automatically when mode=api.[/dim]")
         else:
-            cred = login_gemini_oauth(
-                is_remote=remote,
-                open_browser=not no_browser,
-                timeout_s=timeout,
-            )
-            upsert_oauth_credential("gemini", cred, auth_path=auth_path)
-            console.print(f"[green]Gemini OAuth saved.[/green] email={cred.email or '-'}")
+            console.print("[yellow]Codex credentials not found.[/yellow]")
+            console.print("")
+            console.print("To authenticate Codex, choose one of:")
+            console.print("  1. Set the [bold]OPENAI_API_KEY[/bold] environment variable.")
+            console.print("  2. Log in via the Codex CLI:")
+            console.print("       [bold]codex[/bold]   (runs the interactive Codex login)")
+            console.print("     CrossFire will read ~/.codex/auth.json automatically.")
 
-    except Exception as e:
-        _handle_error(f"Auth login failed for {provider_norm}: {e}", e)
-
-    console.print(f"[dim]Auth store: {auth_path}[/dim]")
-    console.print(
-        "[dim]If your agent config still uses mode=cli, switch it to mode=api in .crossfire/config.yaml.[/dim]"
-    )
+    else:  # gemini
+        result = read_gemini_cli_credentials()
+        if result:
+            access_token, expiry_ms = result
+            console.print("[green]✓ Gemini credentials found in ~/.gemini/oauth_creds.json[/green]")
+            if expiry_ms:
+                import time as _time
+                expires_str = _time.strftime("%Y-%m-%d %H:%M", _time.localtime(expiry_ms / 1000))
+                console.print(f"[dim]Token expires: {expires_str}[/dim]")
+            console.print("[dim]CrossFire will use these automatically when mode=api.[/dim]")
+        else:
+            console.print("[yellow]Gemini credentials not found.[/yellow]")
+            console.print("")
+            console.print("To authenticate Gemini, choose one of:")
+            console.print("  1. Set the [bold]GOOGLE_API_KEY[/bold] environment variable.")
+            console.print("  2. Log in via the Gemini CLI:")
+            console.print("       [bold]gemini[/bold]   (runs the interactive Gemini login)")
+            console.print("     CrossFire will read ~/.gemini/oauth_creds.json automatically.")
 
 
 @auth_app.command("status")
 def auth_status() -> None:
-    """Show local subscription auth status."""
+    """Show auth credential status for all providers."""
     from rich.table import Table
 
     auth_path = resolve_auth_path()
@@ -210,9 +218,8 @@ def auth_status() -> None:
 
     table = Table(title="CrossFire Auth Status", border_style="dim")
     table.add_column("Provider", style="bold")
-    table.add_column("Mode")
+    table.add_column("Source")
     table.add_column("Status")
-    table.add_column("Email", style="dim")
     table.add_column("Expires", style="dim")
 
     for row in rows:
@@ -224,10 +231,11 @@ def auth_status() -> None:
         else:
             status_text = "[red]missing[/red]"
 
-        table.add_row(row["provider"], row["mode"], status_text, row["email"], row["expires"])
+        table.add_row(row["provider"], row["source"], status_text, row["expires"])
 
     console.print(table)
     console.print(f"[dim]Auth store: {auth_path}[/dim]")
+    console.print("[dim]Run `crossfire auth login --provider <name>` for setup help.[/dim]")
 
 
 @app.command()
