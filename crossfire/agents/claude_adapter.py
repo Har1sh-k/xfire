@@ -99,6 +99,16 @@ class ClaudeAgent(BaseAgent):
         logger.info("agent.api.start", agent=self.name, model=self.config.model, auth=auth_label)
 
         messages: list[dict] = [{"role": "user", "content": prompt}]
+        thinking_parts: list[str] = []
+
+        # Extended thinking parameters (requires a supported model)
+        extra_params: dict = {}
+        if self.config.enable_thinking:
+            extra_params["thinking"] = {
+                "type": "enabled",
+                "budget_tokens": self.config.thinking_budget,
+            }
+            extra_params["betas"] = ["interleaved-thinking-2025-05-14"]
 
         for iteration in range(MAX_TOOL_ITERATIONS):
             try:
@@ -106,16 +116,31 @@ class ClaudeAgent(BaseAgent):
                     model=self.config.model,
                     system=system_prompt,
                     messages=messages,
-                    max_tokens=8192,
+                    max_tokens=max(8192, self.config.thinking_budget + 4096)
+                    if self.config.enable_thinking
+                    else 8192,
                     tools=CLAUDE_TOOLS,
+                    **extra_params,
                 )
             except Exception as e:
                 raise AgentError(self.name, f"API call failed: {e}")
+
+            # Collect thinking blocks across all iterations
+            for block in response.content:
+                if block.type == "thinking" and hasattr(block, "thinking"):
+                    thinking_parts.append(block.thinking)
 
             tool_uses = [b for b in response.content if b.type == "tool_use"]
             text_blocks = [b for b in response.content if b.type == "text"]
 
             if not tool_uses:
+                if thinking_parts:
+                    self.thinking_trace = "\n\n---\n\n".join(thinking_parts)
+                    logger.info(
+                        "agent.thinking_complete",
+                        agent=self.name,
+                        thinking_length=len(self.thinking_trace),
+                    )
                 if text_blocks:
                     return text_blocks[-1].text
                 raise AgentError(self.name, "API returned no text content")

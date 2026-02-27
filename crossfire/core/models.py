@@ -323,6 +323,7 @@ class AgentReview(BaseModel):
     files_analyzed: list[str] = Field(default_factory=list)
     skills_used: list[str] = Field(default_factory=list)
     review_duration_seconds: float | None = None
+    thinking_trace: str | None = None  # Extended thinking / reasoning trace
 
 
 # ---------------------------------------------------------------------------

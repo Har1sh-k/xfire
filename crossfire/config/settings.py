@@ -26,6 +26,10 @@ class AgentConfig(BaseModel):
     model: str = ""
     api_key_env: str = ""
     timeout: int = 300
+    # Extended thinking / reasoning (API mode only)
+    enable_thinking: bool = False
+    thinking_budget: int = 10000  # tokens for Claude/Gemini thinking budget
+    reasoning_effort: str = "medium"  # o3: "low" | "medium" | "high"
 
 
 class DebateConfig(BaseModel):

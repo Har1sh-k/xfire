@@ -227,6 +227,7 @@ class CrossFireOrchestrator:
                     overall_risk_assessment=parsed.get("overall_risk", "unknown"),
                     review_methodology=parsed.get("risk_summary", ""),
                     review_duration_seconds=_time.monotonic() - t0,
+                    thinking_trace=agent.thinking_trace,
                 )
             except AgentError as e:
                 logger.error("review.agent_error", agent=agent.name, error=str(e))

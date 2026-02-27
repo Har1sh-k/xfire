@@ -112,11 +112,16 @@ class GeminiAgent(BaseAgent):
         # Build the initial request body
         contents: list[dict] = [{"role": "user", "parts": [{"text": prompt}]}]
         tool_config = {"function_declarations": GEMINI_TOOLS}
+        thinking_parts: list[str] = []
 
         for iteration in range(MAX_TOOL_ITERATIONS):
             body: dict = {"contents": contents, "tools": [tool_config]}
             if system_prompt:
                 body["systemInstruction"] = {"parts": [{"text": system_prompt}]}
+            if self.config.enable_thinking:
+                body["generationConfig"] = {
+                    "thinkingConfig": {"thinkingBudget": self.config.thinking_budget}
+                }
 
             # Choose auth style
             if api_key:
@@ -186,6 +191,21 @@ class GeminiAgent(BaseAgent):
                 contents.append({"role": "user", "parts": function_responses})
 
             else:
+                # Collect any thinking parts from this response
+                candidates = data.get("candidates", [{}])
+                parts = (candidates[0].get("content", {}) if candidates else {}).get("parts", [])
+                for part in parts:
+                    if isinstance(part, dict) and "thought" in part:
+                        thinking_parts.append(str(part["thought"]))
+
+                if thinking_parts:
+                    self.thinking_trace = "\n\n---\n\n".join(thinking_parts)
+                    logger.info(
+                        "agent.thinking_complete",
+                        agent=self.name,
+                        thinking_length=len(self.thinking_trace),
+                    )
+
                 # No function calls — extract final text
                 text = self._extract_text(data)
                 if text:

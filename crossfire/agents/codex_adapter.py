@@ -81,6 +81,11 @@ class CodexAgent(BaseAgent):
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
 
+        extra_params: dict = {}
+        if self.config.enable_thinking:
+            # o3 and o1 models support reasoning_effort
+            extra_params["reasoning_effort"] = self.config.reasoning_effort
+
         for iteration in range(MAX_TOOL_ITERATIONS):
             try:
                 response = await client.chat.completions.create(
@@ -88,6 +93,7 @@ class CodexAgent(BaseAgent):
                     messages=messages,
                     tools=OPENAI_TOOLS,
                     tool_choice="auto",
+                    **extra_params,
                 )
             except Exception as e:
                 if isinstance(e, AgentError):

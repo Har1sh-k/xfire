@@ -34,6 +34,9 @@ class BaseAgent(ABC):
     def __init__(self, config: AgentConfig, repo_dir: str | None = None) -> None:
         self.config = config
         self.repo_dir = repo_dir
+        # Set by _run_api() when extended thinking / reasoning is enabled.
+        # Callers may read this after execute() returns.
+        self.thinking_trace: str | None = None
 
     async def execute(
         self,
@@ -42,6 +45,7 @@ class BaseAgent(ABC):
         context_files: list[str] | None = None,
     ) -> str:
         """Execute agent in configured mode, return raw response."""
+        self.thinking_trace = None  # reset each call
         if self.config.mode == "cli":
             return await self._run_cli(prompt, system_prompt, context_files)
         else:

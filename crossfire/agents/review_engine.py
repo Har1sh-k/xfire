@@ -246,6 +246,15 @@ class ReviewEngine:
                     if isinstance(f, dict) and "file" in f
                 ]
 
+            thinking = agent.thinking_trace if isinstance(agent.thinking_trace, str) else None
+            if thinking:
+                logger.info(
+                    "agent.thinking_trace",
+                    agent=agent.name,
+                    chars=len(thinking),
+                    preview=thinking[:200],
+                )
+
             return AgentReview(
                 agent_name=agent.name,
                 findings=findings,
@@ -253,6 +262,7 @@ class ReviewEngine:
                 review_methodology=parsed.get("risk_summary", ""),
                 files_analyzed=files_analyzed,
                 review_duration_seconds=duration,
+                thinking_trace=thinking,
             )
 
         except AgentError as e:
