@@ -181,13 +181,14 @@ def read_claude_cli_credentials() -> str | None:
 # ---------------------------------------------------------------------------
 
 def read_codex_cli_credentials() -> str | None:
-    """Read the OpenAI API key that the Codex CLI stored in ~/.codex/auth.json.
+    """Read credentials that the Codex CLI stored in ~/.codex/auth.json.
 
-    The Codex CLI persists an ``OPENAI_API_KEY`` field alongside its OAuth
-    tokens.  We surface that key so users who have already logged in via the
-    Codex CLI don't need to set a separate environment variable.
+    Priority:
+    1. ``OPENAI_API_KEY`` top-level field (non-null string) — standard API key.
+    2. ``tokens.access_token`` — OAuth access token from the Codex CLI login
+       flow.  This can be used as a bearer token for subscription-based access.
 
-    Returns the key string, or None if the file is absent / malformed.
+    Returns the credential string, or None if the file is absent / malformed.
     """
     candidates = [
         Path.home() / ".codex" / "auth.json",
@@ -204,9 +205,17 @@ def read_codex_cli_credentials() -> str | None:
         if not isinstance(data, dict):
             continue
 
+        # Prefer a real API key if set
         api_key = data.get("OPENAI_API_KEY")
         if isinstance(api_key, str) and api_key.strip():
             return api_key.strip()
+
+        # Fall back to OAuth access_token stored under tokens{}
+        tokens = data.get("tokens")
+        if isinstance(tokens, dict):
+            access_token = tokens.get("access_token")
+            if isinstance(access_token, str) and access_token.strip():
+                return access_token.strip()
 
     return None
 
