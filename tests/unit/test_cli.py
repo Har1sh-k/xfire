@@ -15,7 +15,7 @@ from crossfire.cli import (
     _preflight_check,
     app,
 )
-from crossfire.config.settings import CrossFireSettings, SeverityGateConfig
+from crossfire.config.settings import CrossFireSettings, SeverityGateConfig, load_settings
 from crossfire.core.models import (
     CrossFireReport,
     Finding,
@@ -203,7 +203,7 @@ class TestPreflightAuthStore:
         monkeypatch.chdir(tmp_path)
         upsert_claude_setup_token("setup-token-value")
 
-        settings = CrossFireSettings()
+        settings = load_settings()
         for name, cfg in settings.agents.items():
             cfg.enabled = name == "claude"
         settings.agents["claude"].mode = "api"
