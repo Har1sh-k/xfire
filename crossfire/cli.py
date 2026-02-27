@@ -333,7 +333,7 @@ def analyze_pr(
         f"Repo: {repo} | PR: #{pr}\n"
         f"Agents: {', '.join(n for n, c in settings.agents.items() if c.enabled)}\n"
         f"Context: {settings.analysis.context_depth} | Debate: {'skip' if skip_debate else 'enabled'}",
-        title="ðŸ”¥ CrossFire",
+        title="[ CrossFire ]",
         border_style="red",
     ))
 
@@ -363,6 +363,7 @@ def analyze_pr(
 @app.command()
 def analyze_diff(
     patch: str | None = typer.Option(None, help="Path to a diff/patch file"),
+    commit: str | None = typer.Option(None, help="Commit SHA to analyze (auto-generates patch via git show)"),
     repo_dir: str = typer.Option(".", help="Path to the repository root"),
     staged: bool = typer.Option(False, help="Analyze staged changes in the repo"),
     base: str | None = typer.Option(None, help="Base branch/commit for comparison"),
@@ -379,14 +380,71 @@ def analyze_diff(
     verbose: bool = typer.Option(False, help="Enable verbose logging"),
     dry_run: bool = typer.Option(False, help="Show what would be analyzed without calling agents"),
 ) -> None:
-    """Analyze a local diff or staged changes."""
+    """Analyze a local diff or staged changes.
+
+    \b
+    Examples:
+      crossfire analyze-diff --staged
+      crossfire analyze-diff --patch changes.patch
+      crossfire analyze-diff --commit f1877d3 --repo-dir /path/to/repo
+      crossfire analyze-diff --base main --head feature-branch
+    """
     import asyncio
+    import subprocess
+    import tempfile
 
     from crossfire.config.settings import ConfigError, load_settings
     from crossfire.core.orchestrator import CrossFireOrchestrator
 
-    if not patch and not staged and not (base and head):
-        _handle_error("Must specify --patch, --staged, or --base/--head.")
+    if not patch and not commit and not staged and not (base and head):
+        _handle_error("Must specify --patch, --commit, --staged, or --base/--head.")
+
+    # Auto-generate patch from a commit SHA
+    _tmp_patch_file: str | None = None
+    if commit:
+        try:
+            result = subprocess.run(
+                ["git", "show", commit],
+                cwd=repo_dir,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+        except subprocess.CalledProcessError as e:
+            _handle_error(f"Cannot generate patch for commit {commit!r}: {e.stderr.strip() or e}")
+        except FileNotFoundError:
+            _handle_error("git not found — cannot generate patch from commit.")
+        tmp = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".patch", prefix="crossfire_",
+            delete=False, encoding="utf-8",
+        )
+        tmp.write(result.stdout)
+        tmp.close()
+        patch = tmp.name
+        _tmp_patch_file = tmp.name
+        console.print(f"[dim]Generated patch for {commit[:12]} ({result.stdout.count(chr(10))} lines)[/dim]")
+
+    # --patch given but file missing: try treating value as a commit SHA
+    elif patch and not Path(patch).exists():
+        try:
+            result = subprocess.run(
+                ["git", "show", patch],
+                cwd=repo_dir,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            tmp = tempfile.NamedTemporaryFile(
+                mode="w", suffix=".patch", prefix="crossfire_",
+                delete=False, encoding="utf-8",
+            )
+            tmp.write(result.stdout)
+            tmp.close()
+            console.print(f"[dim]Patch file not found -- generated from commit {patch[:12]}[/dim]")
+            patch = tmp.name
+            _tmp_patch_file = tmp.name
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            _handle_error(f"Patch file not found: {patch}")
 
     cli_overrides: dict = {}
     if context_depth:
@@ -403,18 +461,28 @@ def analyze_diff(
             if name not in agent_list:
                 settings.agents[name].enabled = False
 
-    mode = "patch" if patch else ("staged" if staged else "range")
+    if commit:
+        mode = "commit:" + commit[:12]
+    elif staged:
+        mode = "staged"
+    elif base and head:
+        mode = "range"
+    else:
+        mode = "patch"
+
     console.print(Panel(
         f"[bold]CrossFire Security Review[/bold]\n"
         f"Mode: {mode} | Repo: {repo_dir}\n"
         f"Agents: {', '.join(n for n, c in settings.agents.items() if c.enabled)}\n"
         f"Context: {settings.analysis.context_depth} | Debate: {'skip' if skip_debate else 'enabled'}",
-        title="ðŸ”¥ CrossFire",
+        title="[ CrossFire ]",
         border_style="red",
     ))
 
     if dry_run:
-        console.print("[yellow]Dry run mode — would analyze the above, exiting.[/yellow]")
+        console.print("[yellow]Dry run mode -- would analyze the above, exiting.[/yellow]")
+        if _tmp_patch_file:
+            Path(_tmp_patch_file).unlink(missing_ok=True)
         raise typer.Exit(0)
 
     orchestrator = CrossFireOrchestrator(settings, cache_dir=cache_dir)
@@ -431,6 +499,9 @@ def analyze_diff(
         _handle_error(str(e))
     except Exception as e:
         _handle_error(f"Analysis failed: {e}", e)
+    finally:
+        if _tmp_patch_file:
+            Path(_tmp_patch_file).unlink(missing_ok=True)
 
     _output_report(report, format, output, False)
 
@@ -474,7 +545,7 @@ def code_review(
         f"Repo: {repo_dir} | Max files: {max_files}\n"
         f"Agents: {', '.join(n for n, c in settings.agents.items() if c.enabled)}\n"
         f"Debate: {'skip' if skip_debate else 'enabled'}",
-        title="ðŸ”¥ CrossFire",
+        title="[ CrossFire ]",
         border_style="red",
     ))
 
@@ -548,7 +619,7 @@ def baseline(
     console.print(Panel(
         f"[bold]CrossFire Baseline Builder[/bold]\n"
         f"Repo: {repo_dir}",
-        title="ðŸ”¥ CrossFire",
+        title="[ CrossFire ]",
         border_style="yellow",
     ))
 
@@ -691,7 +762,7 @@ def scan(
         f"Baseline built from: {base_label} (state before diff)\n"
         f"Agents: {', '.join(n for n, c in settings.agents.items() if c.enabled)}\n"
         f"Context: {settings.analysis.context_depth} | Debate: {'skip' if skip_debate else 'enabled'}",
-        title="ðŸ”¥ CrossFire",
+        title="[ CrossFire ]",
         border_style="red",
     ))
 
@@ -1014,7 +1085,7 @@ def demo(
     console.print(Panel(
         f"[bold]CrossFire Demo[/bold]\n"
         f"Fixture: {fixture}",
-        title="ðŸ”¥ CrossFire",
+        title="[ CrossFire ]",
         border_style="red",
     ))
 
