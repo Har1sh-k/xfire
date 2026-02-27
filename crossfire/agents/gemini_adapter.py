@@ -95,8 +95,20 @@ class GeminiAgent(BaseAgent):
         if api_key:
             auth_label = "api_key"
         else:
+            from crossfire.auth.store import _is_expired, read_gemini_cli_credentials
             access_token = get_gemini_access_token(refresh_if_needed=True)
             if not access_token:
+                # Distinguish expired vs. missing for a helpful error message
+                cli_result = read_gemini_cli_credentials()
+                if cli_result is not None:
+                    _, expiry_ms = cli_result
+                    if _is_expired(expiry_ms):
+                        raise AgentError(
+                            self.name,
+                            "Gemini OAuth token expired. Re-run the Gemini CLI to refresh:\n"
+                            "  gemini\n"
+                            "Then retry CrossFire.",
+                        )
                 raise AgentError(
                     self.name,
                     (

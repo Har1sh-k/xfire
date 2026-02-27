@@ -181,14 +181,14 @@ def read_claude_cli_credentials() -> str | None:
 # ---------------------------------------------------------------------------
 
 def read_codex_cli_credentials() -> str | None:
-    """Read credentials that the Codex CLI stored in ~/.codex/auth.json.
+    """Read the OpenAI API key that the Codex CLI stored in ~/.codex/auth.json.
 
-    Priority:
-    1. ``OPENAI_API_KEY`` top-level field (non-null string) — standard API key.
-    2. ``tokens.access_token`` — OAuth access token from the Codex CLI login
-       flow.  This can be used as a bearer token for subscription-based access.
+    Only returns a real API key (``OPENAI_API_KEY`` field, non-null string).
+    OAuth access tokens stored under ``tokens.access_token`` are NOT returned
+    here because they are Codex-CLI-scoped JWTs that don't work with the
+    standard OpenAI API endpoint — use ``read_codex_oauth_token()`` for those.
 
-    Returns the credential string, or None if the file is absent / malformed.
+    Returns the API key string, or None if the file is absent / malformed / null.
     """
     candidates = [
         Path.home() / ".codex" / "auth.json",
@@ -205,18 +205,37 @@ def read_codex_cli_credentials() -> str | None:
         if not isinstance(data, dict):
             continue
 
-        # Prefer a real API key if set
         api_key = data.get("OPENAI_API_KEY")
         if isinstance(api_key, str) and api_key.strip():
             return api_key.strip()
 
-        # Fall back to OAuth access_token stored under tokens{}
-        tokens = data.get("tokens")
-        if isinstance(tokens, dict):
-            access_token = tokens.get("access_token")
-            if isinstance(access_token, str) and access_token.strip():
-                return access_token.strip()
+    return None
 
+
+def read_codex_oauth_token() -> str | None:
+    """Read the Codex CLI OAuth access token from ~/.codex/auth.json.
+
+    This is the short-lived JWT stored under ``tokens.access_token`` after
+    logging in via the Codex CLI.  It is **not** a standard OpenAI API key
+    and will not work with ``openai.AsyncOpenAI(api_key=...)``.
+
+    Returns the raw token string, or None if absent.
+    """
+    path = Path.home() / ".codex" / "auth.json"
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    tokens = data.get("tokens")
+    if not isinstance(tokens, dict):
+        return None
+    access_token = tokens.get("access_token")
+    if isinstance(access_token, str) and access_token.strip():
+        return access_token.strip()
     return None
 
 

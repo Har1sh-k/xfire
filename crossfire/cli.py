@@ -22,6 +22,7 @@ from crossfire.auth import (
     auth_status_rows,
     has_credentials_for_agent,
     read_codex_cli_credentials,
+    read_codex_oauth_token,
     read_gemini_cli_credentials,
     resolve_auth_path,
     upsert_claude_setup_token,
@@ -198,9 +199,18 @@ def auth_login(
 
     elif provider_norm == "codex":
         key = read_codex_cli_credentials()
+        oauth = read_codex_oauth_token()
         if key:
-            console.print("[green]✓ Codex credentials found in ~/.codex/auth.json[/green]")
-            console.print("[dim]CrossFire will use these automatically when mode=api.[/dim]")
+            console.print("[green]✓ OpenAI API key found in ~/.codex/auth.json[/green]")
+            console.print("[dim]CrossFire will use this automatically when mode=api.[/dim]")
+        elif oauth:
+            console.print("[yellow]Codex CLI OAuth token found in ~/.codex/auth.json[/yellow]")
+            console.print("[yellow]but it cannot be used directly with the OpenAI API.[/yellow]")
+            console.print("")
+            console.print("For API mode you need a real OpenAI API key:")
+            console.print("  Set the [bold]OPENAI_API_KEY[/bold] environment variable (starts with sk-).")
+            console.print("")
+            console.print("[dim]CLI mode works fine — CrossFire will run the Codex CLI directly.[/dim]")
         else:
             console.print("[yellow]Codex credentials not found.[/yellow]")
             console.print("")
@@ -915,9 +925,15 @@ def test_llm(
                 used_mode = f"{config.mode}→{used_mode}"
             return (name, True, used_mode, snippet, elapsed, thinking_preview)
         except asyncio.TimeoutError:
-            return (name, False, config.mode, f"timed out after {timeout}s", _time.monotonic() - t0, None)
+            used_mode = agent.effective_mode
+            if used_mode != config.mode:
+                used_mode = f"{config.mode}→{used_mode}"
+            return (name, False, used_mode, f"timed out after {timeout}s", _time.monotonic() - t0, None)
         except Exception as e:
-            return (name, False, config.mode, str(e)[:80], _time.monotonic() - t0, None)
+            used_mode = agent.effective_mode
+            if used_mode != config.mode:
+                used_mode = f"{config.mode}→{used_mode}"
+            return (name, False, used_mode, str(e)[:80], _time.monotonic() - t0, None)
 
     async def _run_all():
         return await asyncio.gather(*[_test_agent(n, c) for n, c in enabled.items()])
