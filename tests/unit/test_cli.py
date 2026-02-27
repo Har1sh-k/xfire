@@ -12,6 +12,7 @@ from crossfire.cli import (
     _handle_error,
     _output_report,
     _parse_agents_list,
+    _preflight_check,
     app,
 )
 from crossfire.config.settings import CrossFireSettings, SeverityGateConfig
@@ -166,3 +167,47 @@ class TestCliConfigCheck:
         result = runner.invoke(app, ["config-check"])
         assert result.exit_code == 0
         assert "valid" in result.stdout.lower()
+
+class TestAuthCommands:
+    def test_auth_status_defaults(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        result = runner.invoke(app, ["auth", "status"])
+        assert result.exit_code == 0
+        assert "claude" in result.stdout
+        assert "codex" in result.stdout
+        assert "gemini" in result.stdout
+
+    def test_auth_login_claude_token(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        result = runner.invoke(
+            app,
+            ["auth", "login", "--provider", "claude", "--token", "setup-token-value"],
+        )
+        assert result.exit_code == 0
+        auth_file = tmp_path / ".crossfire" / "auth.json"
+        assert auth_file.exists()
+        assert "setup-token-value" in auth_file.read_text(encoding="utf-8")
+
+    def test_auth_login_invalid_provider(self):
+        result = runner.invoke(app, ["auth", "login", "--provider", "invalid"])
+        assert result.exit_code == 1
+        assert "Unknown provider" in result.stdout
+
+
+class TestPreflightAuthStore:
+    def test_api_preflight_accepts_auth_store(self, tmp_path, monkeypatch):
+        import asyncio
+
+        from crossfire.auth.store import upsert_claude_setup_token
+
+        monkeypatch.chdir(tmp_path)
+        upsert_claude_setup_token("setup-token-value")
+
+        settings = CrossFireSettings()
+        for name, cfg in settings.agents.items():
+            cfg.enabled = name == "claude"
+        settings.agents["claude"].mode = "api"
+
+        results = asyncio.run(_preflight_check(settings))
+        assert results["claude"][0] is True
+        assert "subscription auth" in results["claude"][1]

@@ -18,12 +18,25 @@ import typer
 from rich.console import Console
 from rich.panel import Panel
 
+from crossfire.auth import (
+    auth_status_rows,
+    has_credentials_for_agent,
+    login_codex_oauth,
+    login_gemini_oauth,
+    resolve_auth_path,
+    upsert_claude_setup_token,
+    upsert_oauth_credential,
+)
+
 console = Console()
 app = typer.Typer(
     name="crossfire",
     help="Multiple agents. One verdict. Zero blind spots.",
     no_args_is_help=True,
 )
+
+auth_app = typer.Typer(help="Manage subscription auth for Codex, Gemini, and Claude.")
+app.add_typer(auth_app, name="auth")
 
 
 def _parse_agents_list(agents: str | None) -> list[str] | None:
@@ -45,7 +58,7 @@ async def _preflight_check(settings) -> dict[str, tuple[bool, str]]:
     """Ping each enabled agent to verify it is reachable before running pipeline.
 
     For CLI mode: runs `<cli_command> --version` as a subprocess.
-    For API mode: checks that the API key env var is set.
+    For API mode: checks env API key or local subscription auth store.
     Returns {agent_name: (ok, message)}.
     """
     import asyncio
@@ -96,8 +109,13 @@ async def _preflight_check(settings) -> dict[str, tuple[bool, str]]:
             key = os.environ.get(cfg.api_key_env or "")
             if key:
                 results[name] = (True, f"API key set ({cfg.api_key_env})")
+            elif has_credentials_for_agent(name):
+                results[name] = (True, "subscription auth configured (.crossfire/auth.json)")
             else:
-                results[name] = (False, f"API key not set ({cfg.api_key_env})")
+                results[name] = (
+                    False,
+                    f"missing credentials ({cfg.api_key_env} or crossfire auth login --provider {name})",
+                )
 
     return results
 
@@ -121,6 +139,95 @@ def _print_preflight(results: dict[str, tuple[bool, str]]) -> bool:
 
     console.print(table)
     return any_ok
+
+
+@auth_app.command("login")
+def auth_login(
+    provider: str = typer.Option(
+        ...,
+        "--provider",
+        "-p",
+        help="Provider to authenticate: codex|gemini|claude",
+    ),
+    remote: bool = typer.Option(False, help="Use manual URL paste mode (remote/headless)."),
+    no_browser: bool = typer.Option(False, help="Do not auto-open browser URL."),
+    timeout: int = typer.Option(300, help="OAuth callback timeout in seconds."),
+    token: str | None = typer.Option(None, help="Claude setup-token value (optional)."),
+) -> None:
+    """Authenticate subscription providers without relying on provider CLIs."""
+    provider_norm = provider.strip().lower()
+    if provider_norm not in {"codex", "gemini", "claude"}:
+        _handle_error("Unknown provider. Use --provider codex|gemini|claude")
+
+    auth_path = resolve_auth_path()
+
+    try:
+        if provider_norm == "claude":
+            setup_token = token or typer.prompt("Paste Anthropic setup-token", hide_input=True)
+            upsert_claude_setup_token(setup_token, auth_path=auth_path)
+            console.print("[green]Claude setup-token saved.[/green]")
+
+        elif provider_norm == "codex":
+            cred = login_codex_oauth(
+                is_remote=remote,
+                open_browser=not no_browser,
+                timeout_s=timeout,
+            )
+            upsert_oauth_credential("codex", cred, auth_path=auth_path)
+            console.print(f"[green]Codex OAuth saved.[/green] email={cred.email or '-'}")
+            if cred.api_key:
+                console.print("[dim]Codex OAuth exchanged to OpenAI API key for API mode use.[/dim]")
+            else:
+                console.print(
+                    "[yellow]Codex OAuth saved, but no API key exchange token was returned.[/yellow]"
+                )
+
+        else:
+            cred = login_gemini_oauth(
+                is_remote=remote,
+                open_browser=not no_browser,
+                timeout_s=timeout,
+            )
+            upsert_oauth_credential("gemini", cred, auth_path=auth_path)
+            console.print(f"[green]Gemini OAuth saved.[/green] email={cred.email or '-'}")
+
+    except Exception as e:
+        _handle_error(f"Auth login failed for {provider_norm}: {e}", e)
+
+    console.print(f"[dim]Auth store: {auth_path}[/dim]")
+    console.print(
+        "[dim]If your agent config still uses mode=cli, switch it to mode=api in .crossfire/config.yaml.[/dim]"
+    )
+
+
+@auth_app.command("status")
+def auth_status() -> None:
+    """Show local subscription auth status."""
+    from rich.table import Table
+
+    auth_path = resolve_auth_path()
+    rows = auth_status_rows(auth_path)
+
+    table = Table(title="CrossFire Auth Status", border_style="dim")
+    table.add_column("Provider", style="bold")
+    table.add_column("Mode")
+    table.add_column("Status")
+    table.add_column("Email", style="dim")
+    table.add_column("Expires", style="dim")
+
+    for row in rows:
+        status = row["status"]
+        if status == "configured":
+            status_text = "[green]configured[/green]"
+        elif status == "expired":
+            status_text = "[yellow]expired[/yellow]"
+        else:
+            status_text = "[red]missing[/red]"
+
+        table.add_row(row["provider"], row["mode"], status_text, row["email"], row["expires"])
+
+    console.print(table)
+    console.print(f"[dim]Auth store: {auth_path}[/dim]")
 
 
 @app.command()
@@ -170,7 +277,7 @@ def analyze_pr(
         f"Repo: {repo} | PR: #{pr}\n"
         f"Agents: {', '.join(n for n, c in settings.agents.items() if c.enabled)}\n"
         f"Context: {settings.analysis.context_depth} | Debate: {'skip' if skip_debate else 'enabled'}",
-        title="🔥 CrossFire",
+        title="ðŸ”¥ CrossFire",
         border_style="red",
     ))
 
@@ -246,7 +353,7 @@ def analyze_diff(
         f"Mode: {mode} | Repo: {repo_dir}\n"
         f"Agents: {', '.join(n for n, c in settings.agents.items() if c.enabled)}\n"
         f"Context: {settings.analysis.context_depth} | Debate: {'skip' if skip_debate else 'enabled'}",
-        title="🔥 CrossFire",
+        title="ðŸ”¥ CrossFire",
         border_style="red",
     ))
 
@@ -311,7 +418,7 @@ def code_review(
         f"Repo: {repo_dir} | Max files: {max_files}\n"
         f"Agents: {', '.join(n for n, c in settings.agents.items() if c.enabled)}\n"
         f"Debate: {'skip' if skip_debate else 'enabled'}",
-        title="🔥 CrossFire",
+        title="ðŸ”¥ CrossFire",
         border_style="red",
     ))
 
@@ -385,7 +492,7 @@ def baseline(
     console.print(Panel(
         f"[bold]CrossFire Baseline Builder[/bold]\n"
         f"Repo: {repo_dir}",
-        title="🔥 CrossFire",
+        title="ðŸ”¥ CrossFire",
         border_style="yellow",
     ))
 
@@ -528,7 +635,7 @@ def scan(
         f"Baseline built from: {base_label} (state before diff)\n"
         f"Agents: {', '.join(n for n, c in settings.agents.items() if c.enabled)}\n"
         f"Context: {settings.analysis.context_depth} | Debate: {'skip' if skip_debate else 'enabled'}",
-        title="🔥 CrossFire",
+        title="ðŸ”¥ CrossFire",
         border_style="red",
     ))
 
@@ -804,7 +911,7 @@ def demo(
     console.print(Panel(
         f"[bold]CrossFire Demo[/bold]\n"
         f"Fixture: {fixture}",
-        title="🔥 CrossFire",
+        title="ðŸ”¥ CrossFire",
         border_style="red",
     ))
 
@@ -935,7 +1042,7 @@ analysis:
 agents:
   claude:
     enabled: true
-    mode: cli
+    mode: api
     cli_command: "claude"
     cli_args: ["--output-format", "json"]
     model: "claude-sonnet-4-20250514"
@@ -943,7 +1050,7 @@ agents:
     timeout: 300
   codex:
     enabled: true
-    mode: cli
+    mode: api
     cli_command: "codex"
     cli_args: []
     model: "o3-mini"
@@ -951,7 +1058,7 @@ agents:
     timeout: 300
   gemini:
     enabled: true
-    mode: cli
+    mode: api
     cli_command: "gemini"
     cli_args: []
     model: "gemini-2.5-pro"
