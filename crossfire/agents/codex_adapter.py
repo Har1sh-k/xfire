@@ -1,4 +1,4 @@
-"""Codex agent adapter — Codex CLI + OpenAI API."""
+"""Codex agent adapter - OpenAI API with optional subscription OAuth fallback."""
 
 from __future__ import annotations
 
@@ -7,12 +7,13 @@ import os
 import structlog
 
 from crossfire.agents.base import AgentError, BaseAgent
+from crossfire.auth import get_codex_api_key
 
 logger = structlog.get_logger()
 
 
 class CodexAgent(BaseAgent):
-    """Agent adapter for Codex (OpenAI Codex CLI or OpenAI API)."""
+    """Agent adapter for Codex (OpenAI API with auth-store fallback)."""
 
     name = "codex"
 
@@ -51,7 +52,16 @@ class CodexAgent(BaseAgent):
 
         api_key = os.environ.get(self.config.api_key_env)
         if not api_key:
-            raise AgentError(self.name, f"API key not found in env var {self.config.api_key_env}")
+            api_key = get_codex_api_key(refresh_if_needed=True)
+
+        if not api_key:
+            raise AgentError(
+                self.name,
+                (
+                    f"API key not found in env var {self.config.api_key_env}. "
+                    "Run `crossfire auth login --provider codex` for subscription auth."
+                ),
+            )
 
         client = openai.AsyncOpenAI(api_key=api_key, timeout=self.config.timeout)
 

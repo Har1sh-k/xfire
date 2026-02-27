@@ -1,4 +1,4 @@
-"""Claude agent adapter — Claude Code CLI + Anthropic API."""
+"""Claude agent adapter - Anthropic API with setup-token fallback."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import os
 import structlog
 
 from crossfire.agents.base import AgentError, BaseAgent
+from crossfire.auth import get_claude_setup_token
 
 logger = structlog.get_logger()
 
@@ -51,10 +52,20 @@ class ClaudeAgent(BaseAgent):
 
         api_key = os.environ.get(self.config.api_key_env)
         if not api_key:
-            raise AgentError(self.name, f"API key not found in env var {self.config.api_key_env}")
+            api_key = get_claude_setup_token()
+
+        if not api_key:
+            raise AgentError(
+                self.name,
+                (
+                    f"API key not found in env var {self.config.api_key_env}. "
+                    "Run `crossfire auth login --provider claude` to save a setup-token."
+                ),
+            )
 
         client = anthropic.AsyncAnthropic(
-            api_key=api_key, timeout=self.config.timeout,
+            api_key=api_key,
+            timeout=self.config.timeout,
         )
 
         logger.info("agent.api.start", agent=self.name, model=self.config.model)

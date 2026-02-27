@@ -14,7 +14,7 @@ DEFAULT_CONFIG: dict = {
     "agents": {
         "claude": {
             "enabled": True,
-            "mode": "cli",
+            "mode": "api",
             "cli_command": "claude",
             "cli_args": ["--output-format", "json"],
             "model": "claude-sonnet-4-20250514",
@@ -23,7 +23,7 @@ DEFAULT_CONFIG: dict = {
         },
         "codex": {
             "enabled": True,
-            "mode": "cli",
+            "mode": "api",
             "cli_command": "codex",
             "cli_args": [],
             "model": "o3-mini",
@@ -32,7 +32,7 @@ DEFAULT_CONFIG: dict = {
         },
         "gemini": {
             "enabled": True,
-            "mode": "cli",
+            "mode": "api",
             "cli_command": "gemini",
             "cli_args": [],
             "model": "gemini-2.5-pro",
