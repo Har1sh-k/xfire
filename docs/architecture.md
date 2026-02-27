@@ -1,6 +1,8 @@
 # CrossFire Architecture
 
 > Generated from source code analysis. Reflects what the code **actually does**.
+>
+> Last updated: 2026-02-27
 
 ---
 
@@ -216,12 +218,16 @@ crossfire scan . --base main --head feature
 
 | Component | File | Purpose (from code) | Status | Internal Dependencies |
 |-----------|------|---------------------|--------|-----------------------|
-| **CLI Entry Point** | `crossfire/cli.py` | Typer app with 9 commands: `code-review`, `analyze-pr`, `analyze-diff`, `baseline`, `scan`, `report`, `init`, `config-check`, `demo`. `code-review` runs the whole-repo Code Review Pipeline. `baseline` builds `.crossfire/baseline/`. `scan` supports 6 input modes, auto-builds baseline, and prints delta summary. | ✅ IMPLEMENTED | `config.settings`, `core.orchestrator`, `core.baseline`, `core.diff_resolver`, `agents.fast_model`, `core.models`, `core.severity`, `core.context_builder`, `output.*`, `integrations.github.comment_poster` |
+| **CLI Entry Point** | `crossfire/cli.py` | Typer app with 12+ commands: `code-review`, `analyze-pr`, `analyze-diff`, `baseline`, `scan`, `report`, `init`, `config-check`, `demo`, `test-llm`, `auth login`, `auth status`, `debates`. `code-review` runs the whole-repo Code Review Pipeline. `baseline` builds `.crossfire/baseline/`. `scan` supports 6 input modes, auto-builds baseline, and prints delta summary. All pipeline commands accept `--debug` (live log + markdown file), `--silent` (suppress output), `--debate` (render debate chat after results), `--format`, `--output`. `test-llm` tests every configured agent with `AgentTestUI`. `debates` re-renders debate chat from saved JSON. | ✅ IMPLEMENTED | `config.settings`, `core.orchestrator`, `core.baseline`, `core.diff_resolver`, `agents.fast_model`, `core.models`, `core.severity`, `core.context_builder`, `output.*`, `integrations.github.comment_poster`, `cli_ui`, `auth.store` |
+| **Live UI** | `crossfire/cli_ui.py` | Terminal display layer. `HackerUI` — `rich.live.Live`-based phase spinner: animates braille frames (`⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏`) via `int(time.monotonic() * 8)`, shows per-agent status, optional `debug_mode` live-log ring buffer (last 8 events) appended to the display. `AgentTestUI` — `transient=True` Live display for `test-llm`, per-agent `set_testing()`/`set_done()`. Module-level `render_banner()` and `render_stats()` for commands that don't need phase spinners. structlog `processor()` method: buffers events (debug) and raises `structlog.DropEvent()` to suppress stdout during pipeline. | ✅ IMPLEMENTED | `rich.live`, `rich.text`, `structlog` |
+| **Debate Chat Renderer** | `crossfire/output/debate_view.py` | `render_debates(report, console)` renders all debates as a hacker-style terminal chat. Prosecution: left-aligned, red `rich.panel.Panel`. Defense: indented 6 spaces via `rich.padding.Padding`, cyan border. Judge: bright-white border, ⚖ icon. Consensus box: colored by outcome (confirmed=red, rejected=green, modified/inconclusive=yellow). Each `_bubble()` call renders agent header + bordered panel for one speech turn. `--debate` flag on pipeline commands and `crossfire debates --input` both call this. | ✅ IMPLEMENTED | `rich.console`, `rich.panel`, `rich.padding`, `rich.rule`, `rich.text` |
+| **Debug Log Writer** | `crossfire/output/debug_log.py` | `DebugCollector` — thread-safe structlog processor that buffers all pipeline log events in memory (time, level, event, extras). `write_debug_markdown(report, collector, command_info)` writes a timestamped markdown file (`crossfire-debug-YYYYMMDD-HHMMSS.md`) containing: pipeline events table, intent profile, context summary, full agent reviews with reasoning traces, debate transcripts, and the complete final report. Called by `--debug` flag on pipeline commands. | ✅ IMPLEMENTED | `threading`, `pathlib`, `output.markdown_report` |
+| **Auth Store** | `crossfire/auth/store.py` | `AuthStore` Pydantic model persisted at `.crossfire/auth.json`. Stores OAuth tokens and CLI credentials for Claude, Codex, and Gemini. CLI commands: `crossfire auth login --provider <name> [--token <val>]`, `crossfire auth status`. | ✅ IMPLEMENTED | `pydantic`, `pathlib` |
 | **Default Config** | `crossfire/config/defaults.py` | `DEFAULT_CONFIG` dict — nested default values for all settings, including `fast_model` section | ✅ IMPLEMENTED | _(none)_ |
 | **Settings Loader** | `crossfire/config/settings.py` | Loads config with priority: CLI > env > YAML > defaults. Pydantic models for each config section. Added `FastModelConfig` + `fast_model` field on `CrossFireSettings` | ✅ IMPLEMENTED | `config.defaults` |
 | **Core Models** | `crossfire/core/models.py` | 25+ Pydantic v2 models: `PRContext`, `Finding`, `DebateRecord`, `CrossFireReport`, enums, etc. | ✅ IMPLEMENTED | _(none — leaf module)_ |
 | **Context Builder** | `crossfire/core/context_builder.py` | Builds `PRContext` from 5 sources: (1) `build_from_repo()` — whole-repo walk for Code Review Pipeline, reads all source files up to `max_files`, no diff hunks; (2) GitHub PR via API; (3) local diff/patch; (4) staged changes; (5) git refs range. Shared helpers: diff parsing, file enrichment, imports, blame, test discovery. | ✅ IMPLEMENTED | `config.settings.AnalysisConfig`, `core.models`, `integrations.github.pr_loader` |
-| **Intent Inferrer** | `crossfire/core/intent_inference.py` | Multi-signal heuristic engine: README, package metadata, file structure, dependencies, security controls, PR classification | ✅ IMPLEMENTED | `config.settings.RepoConfig`, `core.models` |
+| **Intent Inferrer** | `crossfire/core/intent_inference.py` | Heuristic-first intent inference with optional LLM enrichment. `IntentInferrer.infer(context)` runs the heuristic always. `infer_with_llm(context, agent, inferrer)` runs heuristic first, sends serialized result to LLM via `_format_heuristic_for_prompt()`, parses LLM `IntentProfile`, then merges via `_merge_profiles()`. Merge rules: scalars → LLM overrides if non-empty; lists → union with dedup; trust boundaries → merge by name; security controls → merge by `(type, location)`. On LLM failure: returns heuristic profile (already computed, zero wasted work). Call sites in `orchestrator.py` and `baseline.py` pass `inferrer` to enable enrichment. | ✅ IMPLEMENTED | `config.settings.RepoConfig`, `core.models` |
 | **Finding Synthesizer** | `crossfire/core/finding_synthesizer.py` | Union-find clustering, merges, dedupes findings from multiple agents. Cross-validation boost. Purpose-aware adjustments. Debate routing tags | ✅ IMPLEMENTED | `core.models` |
 | **Policy Engine** | `crossfire/core/policy_engine.py` | Applies suppression rules (category, file pattern, title pattern) to findings | ✅ IMPLEMENTED | `core.models` |
 | **Severity Gate** | `crossfire/core/severity.py` | `should_fail_ci()` — checks if findings breach severity/confidence threshold | ✅ IMPLEMENTED | `core.models` |
@@ -251,6 +257,8 @@ crossfire scan . --base main --head feature
 | **Markdown Report** | `crossfire/output/markdown_report.py` | Generates markdown report: summary table, findings by status, debate logs, purpose assessments | ✅ IMPLEMENTED | `core.models` |
 | **JSON Report** | `crossfire/output/json_report.py` | `report.model_dump_json(indent=2)` — direct Pydantic serialization | ✅ IMPLEMENTED | `core.models` |
 | **SARIF Report** | `crossfire/output/sarif_report.py` | SARIF v2.1.0 with rules (help text), results (partialFingerprints, rank, code snippets, relatedLocations), run properties. Filters rejected findings | ✅ IMPLEMENTED | `core.models` |
+| **Debate Chat Renderer** | `crossfire/output/debate_view.py` | See entry above in CLI/UI section | ✅ IMPLEMENTED | `rich.*` |
+| **Debug Log Writer** | `crossfire/output/debug_log.py` | See entry above in CLI/UI section | ✅ IMPLEMENTED | `output.markdown_report` |
 | **PR Loader** | `crossfire/integrations/github/pr_loader.py` | Async httpx client: fetches PR metadata, diff, file contents (head+base in parallel), README, repo info, commits, manifest files. Populates `config_files`, `ci_config_files`, `directory_structure` | ✅ IMPLEMENTED | `config.settings.AnalysisConfig`, `core.models`, `core.context_builder.parse_diff` |
 | **Comment Poster** | `crossfire/integrations/github/comment_poster.py` | Posts/updates review comment on GitHub PR via Issues API | ✅ IMPLEMENTED | _(none — uses httpx directly)_ |
 
@@ -273,6 +281,19 @@ flowchart TD
         CMD_INIT["init"]
         CMD_CHECK["config-check"]
         CMD_DEMO["demo"]
+        CMD_TESTLLM["test-llm"]
+        CMD_AUTH["auth login / auth status"]
+        CMD_DEBATES["debates"]
+    end
+
+    subgraph UI["CLI Display Layer"]
+        HACKER_UI["cli_ui.py<br/>HackerUI (live phase spinners)<br/>AgentTestUI (test-llm live display)<br/>render_banner() render_stats()"]
+        DEBUG_COLL["output/debug_log.py<br/>DebugCollector (structlog processor)<br/>write_debug_markdown()"]
+        DEBATE_VIEW["output/debate_view.py<br/>render_debates() (chat renderer)"]
+    end
+
+    subgraph AUTH["Auth Layer"]
+        AUTH_STORE["auth/store.py<br/>AuthStore (.crossfire/auth.json)"]
     end
 
     subgraph CONFIG["Config Layer"]
@@ -465,6 +486,21 @@ flowchart TD
     CMD_DIFF -->|"_output_report(report, fmt)"| MD_RPT
     CMD_DIFF -->|"_check_severity_gate()"| SEVERITY
     CMD_REPORT -->|"_output_report(report, fmt)"| MD_RPT
+
+    %% Live UI wiring
+    CMD_CR -->|"HackerUI(debug_mode=...)"| HACKER_UI
+    CMD_PR -->|"HackerUI(debug_mode=...)"| HACKER_UI
+    CMD_DIFF -->|"HackerUI(debug_mode=...)"| HACKER_UI
+    CMD_TESTLLM -->|"AgentTestUI()"| HACKER_UI
+    HACKER_UI -->|"--debug: DebugCollector in processor chain"| DEBUG_COLL
+    DEBUG_COLL -->|"write_debug_markdown(report)"| MD_RPT
+    CMD_CR -->|"--debate: render_debates(report)"| DEBATE_VIEW
+    CMD_PR -->|"--debate: render_debates(report)"| DEBATE_VIEW
+    CMD_DIFF -->|"--debate: render_debates(report)"| DEBATE_VIEW
+    CMD_DEBATES -->|"render_debates(report)"| DEBATE_VIEW
+
+    %% Auth wiring
+    CMD_AUTH -->|"AuthStore.load() / save()"| AUTH_STORE
 
 ```
 
@@ -1413,3 +1449,120 @@ Fallback: await asyncio.wait_for(
 > - `files_data` in `pr_loader.py` — now used for directory structure, config/CI file identification
 > - `emoji` / `SEVERITY_EMOJI` / `STATUS_EMOJI` in `markdown_report.py` — removed
 > - `_severity_max()` in `finding_synthesizer.py` — removed
+
+---
+
+## 5. Recent Additions (Feb 2026)
+
+### Live Terminal UI (`crossfire/cli_ui.py`)
+
+All pipeline commands now show a live phase-by-phase status display using `rich.live.Live`.
+
+**`HackerUI`** — wraps the entire pipeline:
+- Phase list with animated braille spinner (`⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏`) for the active phase, `✓`/`✗` for completed
+- Per-agent status icons (`◉ claude`, `◉ codex`, `◉ gemini`) with running/done/error states
+- `debug_mode=True` appends a live-log section showing last 8 structlog events from a ring buffer
+- `processor()` method slots into structlog processor chain: buffers events (debug) and raises `structlog.DropEvent()` to suppress stdout during pipeline
+
+**`AgentTestUI`** — `transient=True` Live display for `crossfire test-llm`:
+- Per-agent `set_testing(name)` / `set_done(name, ok, msg)` called from async test coroutines
+- Disappears after completion; results rendered as a hacker-styled cyan table
+
+**Module-level functions**:
+- `render_banner()` — ASCII CrossFire logo + tagline
+- `render_stats(repo, mode, agents, ...)` — metadata header (repo, mode, enabled agents, context depth, debate flag)
+
+**structlog configuration pattern**:
+```python
+processors = []
+if debug:
+    processors.append(collector.processor)   # DebugCollector — buffers to memory
+processors.append(ui.processor)              # HackerUI — captures + drops event
+structlog.configure(processors=processors, ...)
+```
+
+---
+
+### Debate Chat Renderer (`crossfire/output/debate_view.py`)
+
+`render_debates(report, console)` renders all `DebateRecord` objects as a terminal chat.
+
+Layout:
+- Round headers via `rich.rule.Rule`
+- Prosecution speech: left-aligned `Panel` with red border
+- Defense speech: `Padding((0,0,0,6))` left-indent + cyan `Panel`
+- Judge speech: bright-white `Panel` with ⚖ icon, full width
+- Consensus box: `Panel` colored by outcome — confirmed=red, rejected=green, modified/inconclusive=yellow
+
+Triggered by:
+- `--debate` flag on `code-review`, `analyze-pr`, `analyze-diff`
+- `crossfire debates --input results.json` command
+
+---
+
+### Debug Log Writer (`crossfire/output/debug_log.py`)
+
+`DebugCollector` is a thread-safe structlog processor that buffers all pipeline events in memory.
+
+`write_debug_markdown(report, collector, command_info)` writes `crossfire-debug-YYYYMMDD-HHMMSS.md` to the current working directory, containing:
+1. Pipeline events table (time, level, event, extras)
+2. Intent profile (purpose, capabilities, trust boundaries, security controls, sensitive paths)
+3. Context summary (files changed, directory structure excerpt, README excerpt)
+4. Agent reviews (methodology, files analyzed, reasoning traces in `<details>`, raw findings)
+5. Debate transcripts (all rounds, judge ruling, consensus)
+6. Full final report (generated by `markdown_report.generate_markdown_report()`)
+
+---
+
+### Heuristic-First Intent Inference (`crossfire/core/intent_inference.py`)
+
+Intent inference now always runs the heuristic engine first, then optionally enriches with an LLM.
+
+**Flow**:
+```
+IntentInferrer.infer(context)           → heuristic IntentProfile (always runs)
+        ↓
+_format_heuristic_for_prompt(profile)   → structured text for LLM context
+        ↓
+LLM call (reframe: "enrich this heuristic threat model")
+        ↓
+parse LLM response → llm IntentProfile
+        ↓
+_merge_profiles(heuristic, llm)         → merged IntentProfile
+        ↓
+on LLM failure: return heuristic (zero wasted work)
+```
+
+**`_merge_profiles` rules**:
+- Scalars (`repo_purpose`, `deployment_context`, `pr_intent`, `risk_surface_change`): LLM overrides if non-empty, else heuristic preserved
+- Lists (`intended_capabilities`, `sensitive_paths`): union with deduplication
+- `trust_boundaries`: merge by name — LLM overrides same-name boundaries, heuristic-only kept
+- `security_controls_detected`: merge by `(control_type, location)` key — overlaps get LLM description + union of covers
+
+**Call sites**:
+- `orchestrator.py` `_run_pipeline()` and `code_review()`: pass `self.intent_inferrer`
+- `baseline.py` `_do_build()`: passes `inferrer`
+
+---
+
+### Auth Store (`crossfire/auth/store.py`)
+
+`AuthStore` is a Pydantic model persisted at `.crossfire/auth.json`. Stores OAuth tokens and CLI credentials per provider (claude, codex, gemini).
+
+CLI commands:
+- `crossfire auth login --provider <name> [--token <val>]`
+- `crossfire auth status`
+
+---
+
+### New CLI Commands & Flags
+
+| Addition | Description |
+|----------|-------------|
+| `crossfire test-llm` | Tests connectivity for every configured agent; shows mode (cli/api), model, latency, pass/fail |
+| `crossfire auth login` | OAuth login or token store for a provider |
+| `crossfire auth status` | Shows auth state for all providers |
+| `crossfire debates --input` | Re-renders debate chat from a saved JSON result file |
+| `--debug` (pipeline cmds) | Shows live log display + writes `crossfire-debug-*.md` to CWD |
+| `--silent` (pipeline cmds) | Suppresses all output (structlog → `/dev/null`) |
+| `--debate` (pipeline cmds) | Renders debate chat viewer after pipeline completes |
