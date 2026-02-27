@@ -687,6 +687,94 @@ def config_check(
         _handle_error(f"Configuration error: {e}")
 
 
+@app.command(name="test-llm")
+def test_llm(
+    repo_dir: str = typer.Option(".", help="Path to the repository root"),
+    agents: str | None = typer.Option(None, help="Comma-separated agent list to test (default: all enabled)"),
+    timeout: int = typer.Option(30, help="Timeout in seconds per agent"),
+) -> None:
+    """Test LLM connectivity by sending a small prompt to each enabled agent."""
+    import asyncio
+    import time as _time
+
+    from rich.table import Table
+
+    from crossfire.agents.review_engine import AGENT_CLASSES
+    from crossfire.config.settings import ConfigError, load_settings
+
+    try:
+        settings = load_settings(repo_dir=repo_dir)
+    except ConfigError as e:
+        _handle_error(str(e))
+
+    agent_list = _parse_agents_list(agents)
+    if agent_list:
+        for name in list(settings.agents.keys()):
+            if name not in agent_list:
+                settings.agents[name].enabled = False
+
+    enabled = {n: c for n, c in settings.agents.items() if c.enabled}
+    if not enabled:
+        _handle_error("No agents are enabled. Check .crossfire/config.yaml.")
+
+    console.print(
+        f"[dim]Testing {len(enabled)} agent(s): {', '.join(enabled.keys())}[/dim]\n"
+    )
+
+    test_prompt = "Respond with exactly one word: hello"
+    test_system = "You are a connectivity test. Respond as briefly as possible."
+
+    async def _test_agent(name: str, config) -> tuple[str, bool, str, float]:
+        cls = AGENT_CLASSES.get(name)
+        if not cls:
+            return (name, False, f"unknown agent type: {name}", 0.0)
+        agent = cls(config)
+        t0 = _time.monotonic()
+        try:
+            raw = await asyncio.wait_for(
+                agent.execute(test_prompt, test_system),
+                timeout=timeout,
+            )
+            elapsed = _time.monotonic() - t0
+            snippet = raw.strip().replace("\n", " ")[:60]
+            return (name, True, snippet, elapsed)
+        except asyncio.TimeoutError:
+            return (name, False, f"timed out after {timeout}s", _time.monotonic() - t0)
+        except Exception as e:
+            return (name, False, str(e)[:80], _time.monotonic() - t0)
+
+    async def _run_all():
+        return await asyncio.gather(
+            *[_test_agent(n, c) for n, c in enabled.items()]
+        )
+
+    results = asyncio.run(_run_all())
+
+    table = Table(title="LLM Connectivity Test", border_style="dim")
+    table.add_column("Agent", style="bold")
+    table.add_column("Status")
+    table.add_column("Response", style="dim")
+    table.add_column("Latency", justify="right")
+
+    all_ok = True
+    for name, ok, msg, elapsed in results:
+        latency = f"{elapsed:.1f}s"
+        if ok:
+            table.add_row(name, "[green]connected[/green]", msg, latency)
+        else:
+            table.add_row(name, "[red]failed[/red]", msg, latency)
+            all_ok = False
+
+    console.print(table)
+
+    if all_ok:
+        console.print(f"\n[green]All {len(enabled)} agent(s) connected successfully.[/green]")
+    else:
+        failed = sum(1 for _, ok, _, _ in results if not ok)
+        console.print(f"\n[red]{failed}/{len(enabled)} agent(s) failed.[/red]")
+        raise typer.Exit(1)
+
+
 @app.command()
 def demo(
     fixture: str = typer.Option(..., help="Fixture name (e.g., auth_bypass_regression)"),
