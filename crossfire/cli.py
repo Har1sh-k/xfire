@@ -221,15 +221,31 @@ def auth_login(
             console.print("     CrossFire will read ~/.codex/auth.json automatically.")
 
     else:  # gemini
+        from crossfire.auth.store import _is_expired
+        import time as _time
+
         result = read_gemini_cli_credentials()
         if result:
-            access_token, expiry_ms = result
-            console.print("[green]✓ Gemini credentials found in ~/.gemini/oauth_creds.json[/green]")
+            _, expiry_ms = result
+            expired = _is_expired(expiry_ms)
             if expiry_ms:
-                import time as _time
                 expires_str = _time.strftime("%Y-%m-%d %H:%M", _time.localtime(expiry_ms / 1000))
-                console.print(f"[dim]Token expires: {expires_str}[/dim]")
-            console.print("[dim]CrossFire will use these automatically when mode=api.[/dim]")
+            else:
+                expires_str = None
+
+            if expired:
+                console.print("[yellow]Gemini credentials found but token is expired.[/yellow]")
+                if expires_str:
+                    console.print(f"[dim]Expired: {expires_str}[/dim]")
+                console.print("")
+                console.print("Refresh your Gemini token:")
+                console.print("  Run [bold]gemini[/bold] in your terminal to log in again.")
+                console.print("  CrossFire will pick up the new token automatically.")
+            else:
+                console.print("[green]✓ Gemini credentials found in ~/.gemini/oauth_creds.json[/green]")
+                if expires_str:
+                    console.print(f"[dim]Token expires: {expires_str}[/dim]")
+                console.print("[dim]CrossFire will use these automatically when mode=api.[/dim]")
         else:
             console.print("[yellow]Gemini credentials not found.[/yellow]")
             console.print("")
