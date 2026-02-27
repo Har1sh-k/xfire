@@ -126,14 +126,18 @@ class BaseAgent(ABC):
     ) -> str:
         """Run a subprocess asynchronously with timeout."""
         import os
+        import shutil
         import sys
 
         timeout = timeout or self.config.timeout
 
-        # On Windows, .cmd/.bat files must be run via cmd.exe /c, and paths
-        # need backslash separators for CreateProcess to find them.
+        # On Windows, CreateProcess does NOT resolve PATHEXT (e.g. .cmd/.bat),
+        # so "codex" won't find "codex.cmd" even if it's in PATH.
+        # Use shutil.which() to get the full resolved path first, then wrap
+        # .cmd/.bat files in "cmd.exe /c" so they execute correctly.
         if sys.platform == "win32":
-            resolved = [os.path.normpath(cmd[0])] + cmd[1:]
+            full_path = shutil.which(cmd[0])
+            resolved = [os.path.normpath(full_path or cmd[0])] + cmd[1:]
             if resolved[0].lower().endswith((".cmd", ".bat")):
                 cmd_exe = os.path.join(
                     os.environ.get("SystemRoot", "C:\\Windows"),
