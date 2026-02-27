@@ -10,6 +10,14 @@ import threading
 import time
 from typing import Any
 
+# Braille spinner animation frames (rotates at ~8 fps via Live refresh rate)
+_SPINNER_FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+
+
+def _spinner() -> str:
+    """Return the current braille spinner frame based on wall-clock time."""
+    return _SPINNER_FRAMES[int(time.monotonic() * 8) % len(_SPINNER_FRAMES)]
+
 from rich.console import Console
 from rich.live import Live
 from rich.text import Text
@@ -379,7 +387,7 @@ class HackerUI:
     def _status_icon(status: str) -> tuple[str, str]:
         icons = {
             "pending":  ("  ○  ", "dim"),
-            "running":  ("  ⠿  ", "cyan"),
+            "running":  (f"  {_spinner()}  ", "cyan"),
             "done":     ("  ✓  ", "bold green"),
             "error":    ("  ✗  ", "bold red"),
         }
@@ -502,7 +510,7 @@ class AgentTestUI:
     def _test_icon(status: str) -> tuple[str, str]:
         return {
             "pending": ("  ○  ", "dim"),
-            "testing": ("  ⠿  ", "cyan"),
+            "testing": (f"  {_spinner()}  ", "cyan"),
             "done":    ("  ✓  ", "bold green"),
             "error":   ("  ✗  ", "bold red"),
         }.get(status, ("  ?  ", "dim"))

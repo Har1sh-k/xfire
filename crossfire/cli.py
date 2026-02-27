@@ -343,6 +343,7 @@ def analyze_pr(
     ),
     verbose: bool = typer.Option(False, help="Enable verbose logging"),
     dry_run: bool = typer.Option(False, help="Show what would be analyzed without calling agents"),
+    debate: bool = typer.Option(False, "--debate", help="Show adversarial debate transcript after the report"),
     debug: bool = typer.Option(False, "--debug", help="Write full debug trace to crossfire-debug-TIMESTAMP.md"),
     silent: bool = typer.Option(False, "--silent", help="Suppress all output — exit code only (for git hooks)"),
 ) -> None:
@@ -432,6 +433,10 @@ def analyze_pr(
         repo=repo, pr_number=pr, github_token=github_token,
     )
 
+    if debate:
+        from crossfire.output.debate_view import render_debates
+        render_debates(report, console)
+
     _check_severity_gate(report, settings)
 
 
@@ -455,6 +460,7 @@ def analyze_diff(
     thinking: bool = typer.Option(False, "--thinking", help="Enable extended thinking/reasoning for all agents"),
     verbose: bool = typer.Option(False, help="Enable verbose logging"),
     dry_run: bool = typer.Option(False, help="Show what would be analyzed without calling agents"),
+    debate: bool = typer.Option(False, "--debate", help="Show adversarial debate transcript after the report"),
     debug: bool = typer.Option(False, "--debug", help="Write full debug trace to crossfire-debug-TIMESTAMP.md"),
     silent: bool = typer.Option(False, "--silent", help="Suppress all output — exit code only (for git hooks)"),
 ) -> None:
@@ -622,6 +628,10 @@ def analyze_diff(
 
     _output_report(report, format, output, False)
 
+    if debate:
+        from crossfire.output.debate_view import render_debates
+        render_debates(report, console)
+
     _check_severity_gate(report, settings)
 
 
@@ -636,6 +646,7 @@ def code_review(
     output: str | None = typer.Option(None, help="Output file path"),
     verbose: bool = typer.Option(False, help="Enable verbose logging"),
     dry_run: bool = typer.Option(False, help="Show what would be analyzed without calling agents"),
+    debate: bool = typer.Option(False, "--debate", help="Show adversarial debate transcript after the report"),
     debug: bool = typer.Option(False, "--debug", help="Write full debug trace to crossfire-debug-TIMESTAMP.md"),
     silent: bool = typer.Option(False, "--silent", help="Suppress all output — exit code only (for git hooks)"),
 ) -> None:
@@ -730,6 +741,11 @@ def code_review(
         console.print(f"[dim]Debug log written → {debug_path}[/dim]")
 
     _output_report(report, format, output, False)
+
+    if debate:
+        from crossfire.output.debate_view import render_debates
+        render_debates(report, console)
+
     _check_severity_gate(report, settings)
 
 
@@ -1036,6 +1052,34 @@ def report(
         _handle_error(f"Invalid report schema in {input}: {e}")
 
     _output_report(cf_report, format, output, False)
+
+
+@app.command()
+def debates(
+    input: str = typer.Option(..., help="Path to a CrossFire JSON results file"),
+) -> None:
+    """Replay adversarial debate transcripts from a saved results file.
+
+    \b
+    Example:
+      crossfire debates --input crossfire-results.json
+    """
+    from crossfire.core.models import CrossFireReport
+    from crossfire.output.debate_view import render_debates
+    from crossfire.cli_ui import render_banner
+
+    input_path = Path(input)
+    if not input_path.exists():
+        _handle_error(f"Input file not found: {input}")
+
+    try:
+        data = json.loads(input_path.read_text())
+        cf_report = CrossFireReport(**data)
+    except Exception as e:
+        _handle_error(f"Failed to load report: {e}", e)
+
+    console.print(render_banner())
+    render_debates(cf_report, console)
 
 
 @app.command()
