@@ -752,17 +752,19 @@ def test_llm(
 
     table = Table(title="LLM Connectivity Test", border_style="dim")
     table.add_column("Agent", style="bold")
+    table.add_column("Mode")
     table.add_column("Status")
     table.add_column("Response", style="dim")
     table.add_column("Latency", justify="right")
 
     all_ok = True
     for name, ok, msg, elapsed in results:
+        mode = enabled[name].mode
         latency = f"{elapsed:.1f}s"
         if ok:
-            table.add_row(name, "[green]connected[/green]", msg, latency)
+            table.add_row(name, mode, "[green]connected[/green]", msg, latency)
         else:
-            table.add_row(name, "[red]failed[/red]", msg, latency)
+            table.add_row(name, mode, "[red]failed[/red]", msg, latency)
             all_ok = False
 
     console.print(table)
