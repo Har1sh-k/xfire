@@ -47,19 +47,31 @@ class CodexAgent(BaseAgent):
         # Pass prompt via stdin to avoid Windows CreateProcess 32K command-line limit.
         # codex exec reads from stdin when no positional prompt arg is given.
         raw = await self._run_subprocess(cmd, stdin_data=full_prompt)
-        # Codex outputs JSONL with --json; extract the final text message
-        return self._parse_jsonl_output(raw)
+        # Codex outputs JSONL with --json; extract response text and reasoning
+        response, reasoning = self._parse_jsonl_output(raw)
+        if reasoning:
+            self.thinking_trace = reasoning
+        return response
 
     @staticmethod
-    def _parse_jsonl_output(raw: str) -> str:
-        """Extract assistant text from Codex JSONL stream output.
+    def _parse_jsonl_output(raw: str) -> tuple[str, str]:
+        """Extract assistant text and reasoning from Codex JSONL stream output.
 
-        Each line is a JSON object. We collect all ``message`` content where
-        role is ``assistant`` and return the last non-empty text block.
+        Handles the current Codex CLI JSONL format:
+          {type:"item.completed", item:{type:"agent_message", text:"..."}}  — response
+          {type:"item.completed", item:{type:"reasoning",      text:"..."}}  — thinking
+
+        Also handles the legacy OpenAI format:
+          {role:"assistant", content:[{type:"output_text", text:"..."}]}
+          {type:"output_text", text:"..."}
+
+        Returns (response_text, reasoning_text).
         """
         import json as _json
 
         texts: list[str] = []
+        reasoning_parts: list[str] = []
+
         for line in raw.splitlines():
             line = line.strip()
             if not line:
@@ -68,10 +80,21 @@ class CodexAgent(BaseAgent):
                 obj = _json.loads(line)
             except _json.JSONDecodeError:
                 continue
-            # Codex JSONL format: {type: "message", role: "assistant", content: [...]}
             if not isinstance(obj, dict):
                 continue
-            if obj.get("role") == "assistant":
+
+            # Current Codex CLI format: item.completed events
+            if obj.get("type") == "item.completed" and isinstance(obj.get("item"), dict):
+                item = obj["item"]
+                item_type = item.get("type", "")
+                text = item.get("text", "")
+                if item_type == "agent_message" and text:
+                    texts.append(text)
+                elif item_type == "reasoning" and text:
+                    reasoning_parts.append(text)
+
+            # Legacy: {role: "assistant", content: [{type: "output_text", text: "..."}]}
+            elif obj.get("role") == "assistant":
                 content = obj.get("content", [])
                 if isinstance(content, list):
                     for block in content:
@@ -79,13 +102,15 @@ class CodexAgent(BaseAgent):
                             texts.append(block.get("text", ""))
                 elif isinstance(content, str):
                     texts.append(content)
-            # Also handle flat {type: "output_text", text: "..."} lines
+
+            # Flat: {type: "output_text", text: "..."}
             elif obj.get("type") == "output_text":
                 texts.append(obj.get("text", ""))
 
-        result = "\n".join(t for t in texts if t.strip()).strip()
-        # Fall back to raw output if we couldn't parse anything useful
-        return result if result else raw
+        response = "\n".join(t for t in texts if t.strip()).strip()
+        reasoning = "\n\n---\n\n".join(r for r in reasoning_parts if r.strip()).strip()
+        # Fall back to raw output if we couldn't parse any response text
+        return (response if response else raw, reasoning)
 
     async def _run_api(
         self,

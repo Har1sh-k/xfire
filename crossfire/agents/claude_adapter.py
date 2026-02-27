@@ -50,7 +50,34 @@ class ClaudeAgent(BaseAgent):
         cmd.extend(self.config.cli_args)
 
         # Pass prompt via stdin — avoids Windows 32K command-line limit
-        return await self._run_subprocess(cmd, stdin_data=prompt)
+        raw = await self._run_subprocess(cmd, stdin_data=prompt)
+        return self._unwrap_cli_json(raw)
+
+    @staticmethod
+    def _unwrap_cli_json(raw: str) -> str:
+        """Extract the actual response text from the Claude CLI JSON wrapper.
+
+        Claude CLI with --output-format json wraps the response as:
+          {"type":"result","subtype":"success","is_error":false,"result":"<actual text>",...}
+
+        We extract only the ``result`` field so callers get Claude's raw text
+        (which may itself be a JSON findings object) rather than the CLI envelope.
+        Falls back to raw output on any parse failure.
+        """
+        import json as _json
+
+        try:
+            wrapper = _json.loads(raw.strip())
+            if (
+                isinstance(wrapper, dict)
+                and wrapper.get("type") == "result"
+                and not wrapper.get("is_error", False)
+                and "result" in wrapper
+            ):
+                return str(wrapper["result"])
+        except (_json.JSONDecodeError, TypeError):
+            pass
+        return raw
 
     async def _run_api(
         self,
