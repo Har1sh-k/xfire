@@ -805,10 +805,30 @@ def config_check(
 @app.command(name="test-llm")
 def test_llm(
     repo_dir: str = typer.Option(".", help="Path to the repository root"),
-    agents: str | None = typer.Option(None, help="Comma-separated agent list to test (default: all enabled)"),
+    agents: str | None = typer.Option(
+        None, help="Comma-separated agent list to test (default: all enabled)"
+    ),
     timeout: int = typer.Option(30, help="Timeout in seconds per agent"),
+    mode: str | None = typer.Option(
+        None, help="Override mode for all agents: cli or api"
+    ),
+    prompt: str | None = typer.Option(
+        None, help="Custom test prompt to send to each agent"
+    ),
+    thinking: bool = typer.Option(
+        False, "--thinking", help="Enable extended thinking / reasoning for the test"
+    ),
 ) -> None:
-    """Test LLM connectivity by sending a small prompt to each enabled agent."""
+    """Test LLM connectivity by sending a small prompt to each enabled agent.
+
+    \b
+    Examples:
+      crossfire test-llm                          # test all agents in default mode
+      crossfire test-llm --agents claude          # test only Claude
+      crossfire test-llm --mode api               # force API mode for all
+      crossfire test-llm --thinking               # enable extended thinking
+      crossfire test-llm --prompt "What is 2+2?"  # custom prompt
+    """
     import asyncio
     import time as _time
 
@@ -828,22 +848,37 @@ def test_llm(
             if name not in agent_list:
                 settings.agents[name].enabled = False
 
+    # Override mode if requested
+    if mode:
+        mode_norm = mode.strip().lower()
+        if mode_norm not in {"cli", "api"}:
+            _handle_error("--mode must be cli or api")
+        for cfg in settings.agents.values():
+            cfg.mode = mode_norm
+
+    # Enable thinking if requested
+    if thinking:
+        for cfg in settings.agents.values():
+            cfg.enable_thinking = True
+
     enabled = {n: c for n, c in settings.agents.items() if c.enabled}
     if not enabled:
         _handle_error("No agents are enabled. Check .crossfire/config.yaml.")
 
+    mode_summary = f"mode={mode}" if mode else "default mode"
     console.print(
-        f"[dim]Testing {len(enabled)} agent(s): {', '.join(enabled.keys())}[/dim]\n"
+        f"[dim]Testing {len(enabled)} agent(s): {', '.join(enabled.keys())} "
+        f"({mode_summary})[/dim]\n"
     )
 
-    test_prompt = "Respond with exactly one word: hello"
+    test_prompt = prompt or "Respond with exactly one word: hello"
     test_system = "You are a connectivity test. Respond as briefly as possible."
 
-    async def _test_agent(name: str, config) -> tuple[str, bool, str, float]:
+    async def _test_agent(name: str, config) -> tuple[str, bool, str, float, str | None]:
         cls = AGENT_CLASSES.get(name)
         if not cls:
-            return (name, False, f"unknown agent type: {name}", 0.0)
-        agent = cls(config)
+            return (name, False, f"unknown agent type: {name}", 0.0, None)
+        agent = cls(config, repo_dir=repo_dir)
         t0 = _time.monotonic()
         try:
             raw = await asyncio.wait_for(
@@ -852,16 +887,15 @@ def test_llm(
             )
             elapsed = _time.monotonic() - t0
             snippet = raw.strip().replace("\n", " ")[:60]
-            return (name, True, snippet, elapsed)
+            thinking_preview = agent.thinking_trace[:80] if agent.thinking_trace else None
+            return (name, True, snippet, elapsed, thinking_preview)
         except asyncio.TimeoutError:
-            return (name, False, f"timed out after {timeout}s", _time.monotonic() - t0)
+            return (name, False, f"timed out after {timeout}s", _time.monotonic() - t0, None)
         except Exception as e:
-            return (name, False, str(e)[:80], _time.monotonic() - t0)
+            return (name, False, str(e)[:80], _time.monotonic() - t0, None)
 
     async def _run_all():
-        return await asyncio.gather(
-            *[_test_agent(n, c) for n, c in enabled.items()]
-        )
+        return await asyncio.gather(*[_test_agent(n, c) for n, c in enabled.items()])
 
     results = asyncio.run(_run_all())
 
@@ -871,15 +905,20 @@ def test_llm(
     table.add_column("Status")
     table.add_column("Response", style="dim")
     table.add_column("Latency", justify="right")
+    if thinking:
+        table.add_column("Thinking preview", style="dim")
 
     all_ok = True
-    for name, ok, msg, elapsed in results:
-        mode = enabled[name].mode
+    for row in results:
+        name, ok, msg, elapsed, thinking_preview = row
+        agent_mode = enabled[name].mode
         latency = f"{elapsed:.1f}s"
-        if ok:
-            table.add_row(name, mode, "[green]connected[/green]", msg, latency)
-        else:
-            table.add_row(name, mode, "[red]failed[/red]", msg, latency)
+        status = "[green]connected[/green]" if ok else "[red]failed[/red]"
+        row_cells = [name, agent_mode, status, msg, latency]
+        if thinking:
+            row_cells.append(thinking_preview or "-")
+        table.add_row(*row_cells)
+        if not ok:
             all_ok = False
 
     console.print(table)
@@ -887,7 +926,7 @@ def test_llm(
     if all_ok:
         console.print(f"\n[green]All {len(enabled)} agent(s) connected successfully.[/green]")
     else:
-        failed = sum(1 for _, ok, _, _ in results if not ok)
+        failed = sum(1 for _, ok, *_ in results if not ok)
         console.print(f"\n[red]{failed}/{len(enabled)} agent(s) failed.[/red]")
         raise typer.Exit(1)
 
