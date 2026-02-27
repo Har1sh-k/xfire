@@ -101,7 +101,7 @@ severity_gate:
   min_confidence: 0.7
 ```
 
-Full config reference: [`docs/configuration.md`](docs/configuration.md) _(see architecture docs)_
+Full config reference: [`docs/architecture.md`](docs/architecture.md)
 
 ---
 
