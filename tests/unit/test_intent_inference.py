@@ -1,8 +1,24 @@
 """Tests for intent inference."""
 
+import asyncio
+from unittest.mock import AsyncMock
+
 from crossfire.config.settings import RepoConfig
-from crossfire.core.intent_inference import IntentInferrer
-from crossfire.core.models import FileContext, DiffHunk, PRContext, RelatedFile
+from crossfire.core.intent_inference import (
+    IntentInferrer,
+    _format_heuristic_for_prompt,
+    _merge_profiles,
+    infer_with_llm,
+)
+from crossfire.core.models import (
+    DiffHunk,
+    FileContext,
+    IntentProfile,
+    PRContext,
+    RelatedFile,
+    SecurityControl,
+    TrustBoundary,
+)
 
 
 def _make_context(**kwargs) -> PRContext:
@@ -302,3 +318,233 @@ class TestDetectSensitivePaths:
         )
         paths = inferrer._detect_sensitive_paths(ctx)
         assert paths == []
+
+
+# ─── _merge_profiles Tests ───────────────────────────────────────────────────
+
+
+class TestMergeProfiles:
+    def test_llm_overrides_scalar_when_nonempty(self):
+        heuristic = IntentProfile(
+            repo_purpose="heuristic purpose",
+            deployment_context="Docker",
+            pr_intent="bugfix",
+            risk_surface_change="1 file modified",
+        )
+        llm = IntentProfile(
+            repo_purpose="LLM enriched purpose",
+            deployment_context="Kubernetes cluster",
+            pr_intent="",
+            risk_surface_change="",
+        )
+        merged = _merge_profiles(heuristic, llm)
+        assert merged.repo_purpose == "LLM enriched purpose"
+        assert merged.deployment_context == "Kubernetes cluster"
+        # LLM empty → heuristic preserved
+        assert merged.pr_intent == "bugfix"
+        assert merged.risk_surface_change == "1 file modified"
+
+    def test_heuristic_preserved_when_llm_empty(self):
+        heuristic = IntentProfile(repo_purpose="heuristic", pr_intent="feature")
+        llm = IntentProfile()
+        merged = _merge_profiles(heuristic, llm)
+        assert merged.repo_purpose == "heuristic"
+        assert merged.pr_intent == "feature"
+
+    def test_capabilities_union_deduped(self):
+        heuristic = IntentProfile(intended_capabilities=["web_server", "http_input", "database_access"])
+        llm = IntentProfile(intended_capabilities=["http_input", "llm_powered", "database_access"])
+        merged = _merge_profiles(heuristic, llm)
+        assert merged.intended_capabilities == ["web_server", "http_input", "database_access", "llm_powered"]
+
+    def test_sensitive_paths_union_deduped(self):
+        heuristic = IntentProfile(sensitive_paths=["auth/login.py", "payments/stripe.py"])
+        llm = IntentProfile(sensitive_paths=["auth/login.py", "crypto/keys.py"])
+        merged = _merge_profiles(heuristic, llm)
+        assert merged.sensitive_paths == ["auth/login.py", "payments/stripe.py", "crypto/keys.py"]
+
+    def test_trust_boundaries_merge_by_name(self):
+        heuristic = IntentProfile(trust_boundaries=[
+            TrustBoundary(name="HTTP boundary", description="heuristic desc", untrusted_inputs=["body"]),
+            TrustBoundary(name="DB boundary", description="heuristic DB"),
+        ])
+        llm = IntentProfile(trust_boundaries=[
+            TrustBoundary(name="HTTP boundary", description="LLM enriched HTTP", untrusted_inputs=["body", "headers"]),
+            TrustBoundary(name="LLM boundary", description="LLM-only boundary"),
+        ])
+        merged = _merge_profiles(heuristic, llm)
+        tb_names = [tb.name for tb in merged.trust_boundaries]
+        assert "HTTP boundary" in tb_names
+        assert "DB boundary" in tb_names
+        assert "LLM boundary" in tb_names
+        # HTTP boundary should be LLM's version
+        http_tb = next(tb for tb in merged.trust_boundaries if tb.name == "HTTP boundary")
+        assert http_tb.description == "LLM enriched HTTP"
+
+    def test_security_controls_merge_by_key(self):
+        heuristic = IntentProfile(security_controls_detected=[
+            SecurityControl(
+                control_type="auth_decorator", location="views.py",
+                description="heuristic found auth", covers=["views.py"],
+            ),
+            SecurityControl(
+                control_type="rate_limiting", location="middleware.py",
+                description="heuristic rate limit", covers=["api/"],
+            ),
+        ])
+        llm = IntentProfile(security_controls_detected=[
+            SecurityControl(
+                control_type="auth_decorator", location="views.py",
+                description="LLM: comprehensive auth check", covers=["views.py", "admin.py"],
+            ),
+            SecurityControl(
+                control_type="csrf_protection", location="settings.py",
+                description="LLM found CSRF", covers=["forms/"],
+            ),
+        ])
+        merged = _merge_profiles(heuristic, llm)
+        types = [(sc.control_type, sc.location) for sc in merged.security_controls_detected]
+        assert ("auth_decorator", "views.py") in types
+        assert ("rate_limiting", "middleware.py") in types
+        assert ("csrf_protection", "settings.py") in types
+
+        # Overlapping control: LLM description + union of covers
+        auth = next(sc for sc in merged.security_controls_detected
+                    if sc.control_type == "auth_decorator")
+        assert auth.description == "LLM: comprehensive auth check"
+        assert "views.py" in auth.covers
+        assert "admin.py" in auth.covers
+
+    def test_empty_profiles(self):
+        merged = _merge_profiles(IntentProfile(), IntentProfile())
+        assert merged.repo_purpose == ""
+        assert merged.intended_capabilities == []
+
+
+# ─── _format_heuristic_for_prompt Tests ──────────────────────────────────────
+
+
+class TestFormatHeuristicForPrompt:
+    def test_all_fields_present(self):
+        profile = IntentProfile(
+            repo_purpose="A web app",
+            deployment_context="Docker",
+            pr_intent="feature",
+            risk_surface_change="2 new files",
+            intended_capabilities=["web_server", "database_access"],
+            security_controls_detected=[
+                SecurityControl(
+                    control_type="auth_decorator", location="views.py",
+                    description="login required", covers=["views.py"],
+                ),
+            ],
+            trust_boundaries=[
+                TrustBoundary(
+                    name="HTTP boundary", description="all HTTP input untrusted",
+                    untrusted_inputs=["body", "headers"], controls=["auth_decorator"],
+                ),
+            ],
+            sensitive_paths=["auth/login.py"],
+        )
+        text = _format_heuristic_for_prompt(profile)
+        assert "repo_purpose: A web app" in text
+        assert "deployment_context: Docker" in text
+        assert "pr_intent: feature" in text
+        assert "risk_surface_change: 2 new files" in text
+        assert "web_server" in text
+        assert "database_access" in text
+        assert "auth_decorator" in text
+        assert "HTTP boundary" in text
+        assert "auth/login.py" in text
+
+    def test_empty_profile(self):
+        text = _format_heuristic_for_prompt(IntentProfile())
+        assert "repo_purpose:" in text
+        # Should not contain section headers for empty lists
+        assert "intended_capabilities:" not in text
+        assert "trust_boundaries:" not in text
+        assert "sensitive_paths:" not in text
+
+
+# ─── infer_with_llm Enrichment Flow Tests ────────────────────────────────────
+
+
+class TestInferWithLlmEnrichment:
+    def test_heuristic_always_runs_and_llm_enriches(self):
+        """When LLM succeeds, result is merged heuristic + LLM."""
+        llm_response = '''{
+            "repo_purpose": "LLM: an API service for payments",
+            "deployment_context": "AWS ECS",
+            "intended_capabilities": ["payment_processing", "web_server"],
+            "trust_boundaries": [
+                {"name": "HTTP boundary", "description": "LLM HTTP desc", "untrusted_inputs": ["body"], "controls": ["auth"]}
+            ],
+            "security_controls": [
+                {"control_type": "encryption", "location": "crypto.py", "description": "LLM found encryption", "covers": ["payments/"]}
+            ],
+            "sensitive_paths": ["payments/charge.py"],
+            "threat_summary": "Attackers target payment flow"
+        }'''
+
+        mock_agent = AsyncMock()
+        mock_agent.execute.return_value = llm_response
+
+        ctx = _make_context(
+            pr_title="Add payment endpoint",
+            config_files={"requirements.txt": "flask\n"},
+            readme_content="# PayApp\n\nA payment processing service.",
+        )
+
+        inferrer = IntentInferrer()
+        result = asyncio.get_event_loop().run_until_complete(
+            infer_with_llm(ctx, mock_agent, inferrer)
+        )
+
+        # LLM scalars should override
+        assert "LLM: an API service for payments" in result.repo_purpose
+        assert result.deployment_context == "AWS ECS"
+
+        # Heuristic fields should be preserved (pr_intent from heuristic)
+        assert result.pr_intent == "feature"  # heuristic classified "Add payment endpoint"
+
+        # Capabilities should be union
+        assert "web_server" in result.intended_capabilities
+        assert "payment_processing" in result.intended_capabilities
+        assert "http_input" in result.intended_capabilities  # from heuristic Flask detection
+
+        # Agent was called once
+        mock_agent.execute.assert_called_once()
+
+    def test_fallback_to_heuristic_on_llm_failure(self):
+        """When LLM fails, we get the heuristic profile back."""
+        mock_agent = AsyncMock()
+        mock_agent.execute.side_effect = RuntimeError("LLM unavailable")
+
+        ctx = _make_context(
+            pr_title="Fix crash in login handler",
+            config_files={"requirements.txt": "django\n"},
+        )
+
+        inferrer = IntentInferrer()
+        result = asyncio.get_event_loop().run_until_complete(
+            infer_with_llm(ctx, mock_agent, inferrer)
+        )
+
+        # Should still have heuristic results
+        assert result.pr_intent == "bugfix"
+        assert "web_server" in result.intended_capabilities  # django detected
+        assert "http_input" in result.intended_capabilities
+
+    def test_default_inferrer_created_when_none(self):
+        """When no inferrer passed, a default IntentInferrer() is created."""
+        mock_agent = AsyncMock()
+        mock_agent.execute.side_effect = RuntimeError("fail")
+
+        ctx = _make_context(pr_title="Add feature", config_files={"requirements.txt": "flask\n"})
+
+        result = asyncio.get_event_loop().run_until_complete(
+            infer_with_llm(ctx, mock_agent)
+        )
+
+        # Heuristic still ran with default inferrer
+        assert "web_server" in result.intended_capabilities

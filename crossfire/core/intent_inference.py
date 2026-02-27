@@ -1,10 +1,16 @@
 """Purpose and intent inference for CrossFire.
 
-Two modes:
-- Heuristic: multi-signal regex/dependency analysis (no LLM, always available)
-- LLM: infer_with_llm() uses Claude Sonnet as a threat modeller — produces a
-  full threat model: trust boundaries, attack surface, intended capabilities,
-  security controls. Falls back to heuristic if the LLM call fails.
+Heuristic-first with optional LLM enrichment:
+
+1. **Heuristic** (IntentInferrer.infer): multi-signal regex/dependency analysis
+   — always available, zero-cost, produces pr_intent, risk_surface_change,
+   regex-detected security controls, and dependency-mapped capabilities.
+
+2. **LLM-enriched** (infer_with_llm): runs heuristic first, sends results to
+   Claude Sonnet as context for enrichment, then merges the LLM's threat model
+   (threat_summary, rich trust boundaries, nuanced repo_purpose) with the
+   heuristic output into a single IntentProfile. Falls back to the already-
+   computed heuristic profile on any LLM failure — zero wasted work.
 """
 
 from __future__ import annotations
@@ -24,9 +30,12 @@ if TYPE_CHECKING:
 # LLM-based threat modelling
 # ---------------------------------------------------------------------------
 
-INTENT_INFERENCE_SYSTEM = """You are a senior security architect performing threat modelling on a code repository.
+INTENT_INFERENCE_SYSTEM = """You are a senior security architect enriching a heuristic threat model for a code repository.
 
-Analyze the provided repository context and produce a structured threat model that will guide a security code review.
+You will receive a pre-computed heuristic analysis alongside the raw repository context.  Your job is to:
+1. **Validate** — confirm or correct heuristic findings using your understanding of the code.
+2. **Extend** — add capabilities, trust boundaries, controls, or sensitive paths the heuristics missed.
+3. **Enrich** — provide a nuanced repo_purpose, deployment_context, and threat_summary that go beyond regex signals.
 
 Respond ONLY with a valid JSON object — no markdown fences, no explanation, no preamble.
 
@@ -34,6 +43,8 @@ JSON schema:
 {
   "repo_purpose": "1-3 sentence description of what this system does and who uses it",
   "deployment_context": "where/how deployed — local agent, cloud service, CI runner, CLI tool, etc.",
+  "pr_intent": "optional — override if heuristic classification is wrong, else omit or leave empty",
+  "risk_surface_change": "optional — override if heuristic missed something significant, else omit or leave empty",
   "intended_capabilities": [
     "short string describing each intentional capability — e.g. 'execute user code in sandboxed subprocess', 'manage OAuth tokens for 3rd-party services', 'route WebSocket messages between clients'"
   ],
@@ -60,14 +71,24 @@ JSON schema:
 Be specific and technical. The intended_capabilities list is critical — it tells security reviewers what the system is *supposed* to do so they don't flag intentional behaviour as bugs."""
 
 
-async def infer_with_llm(context: PRContext, agent: "BaseAgent") -> IntentProfile:
-    """Use Claude Sonnet as a threat modeller to build a structured IntentProfile.
+async def infer_with_llm(
+    context: PRContext,
+    agent: "BaseAgent",
+    inferrer: "IntentInferrer | None" = None,
+) -> IntentProfile:
+    """Run heuristic-first intent inference enriched by an LLM threat model.
 
-    Sends README + directory structure + key configs to the agent and parses
-    the JSON threat model response into an IntentProfile.
-
-    Falls back to heuristic IntentInferrer().infer(context) on any failure.
+    1. Always runs the heuristic inferrer to produce a baseline IntentProfile.
+    2. Sends the heuristic results + raw repo context to the LLM for enrichment.
+    3. Merges LLM output on top of heuristic output via _merge_profiles().
+    4. On any LLM failure, returns the already-computed heuristic profile.
     """
+    # 1. Always run heuristic first
+    if inferrer is None:
+        inferrer = IntentInferrer()
+    heuristic_profile = inferrer.infer(context)
+
+    # 2. Build prompt with both raw context and heuristic summary
     readme = (context.readme_content or "")[:4000]
     directory = (context.directory_structure or "")[:2000]
 
@@ -75,55 +96,171 @@ async def infer_with_llm(context: PRContext, agent: "BaseAgent") -> IntentProfil
     for name, content in list((context.config_files or {}).items())[:6]:
         config_summary += f"\n### {name}\n{content[:600]}\n"
 
+    heuristic_section = _format_heuristic_for_prompt(heuristic_profile)
+
     prompt = (
-        f"Perform threat modelling on this repository.\n\n"
+        f"Enrich the following heuristic threat model using the raw repository context below.\n\n"
+        f"## Pre-Computed Heuristic Analysis\n{heuristic_section}\n\n"
         f"## README\n{readme}\n\n"
         f"## Directory Structure\n{directory}\n\n"
         f"## Key Config / Manifest Files\n{config_summary}\n\n"
-        f"Return the JSON threat model object only."
+        f"Return the enriched JSON threat model object only."
     )
 
     try:
         raw = await agent.execute(prompt, INTENT_INFERENCE_SYSTEM)
         data = _extract_json(raw)
-
-        trust_boundaries = [
-            TrustBoundary(
-                name=tb.get("name", ""),
-                description=tb.get("description", ""),
-                untrusted_inputs=tb.get("untrusted_inputs", []),
-                controls=tb.get("controls", []),
-            )
-            for tb in data.get("trust_boundaries", [])
-        ]
-
-        security_controls = [
-            SecurityControl(
-                control_type=sc.get("control_type", ""),
-                location=sc.get("location", ""),
-                description=sc.get("description", ""),
-                covers=sc.get("covers", []),
-            )
-            for sc in data.get("security_controls", [])
-        ]
-
-        purpose = data.get("repo_purpose", "")
-        threat_summary = data.get("threat_summary", "")
-        if threat_summary:
-            purpose = f"{purpose}\n\nThreat summary: {threat_summary}"
-
-        return IntentProfile(
-            repo_purpose=purpose,
-            intended_capabilities=data.get("intended_capabilities", []),
-            trust_boundaries=trust_boundaries,
-            security_controls_detected=security_controls,
-            deployment_context=data.get("deployment_context"),
-            sensitive_paths=data.get("sensitive_paths", []),
-        )
+        llm_profile = _parse_llm_response(data)
+        return _merge_profiles(heuristic_profile, llm_profile)
 
     except Exception:
-        # Fall back to heuristic inference
-        return IntentInferrer().infer(context)
+        # LLM failed — heuristic already computed, zero wasted work
+        return heuristic_profile
+
+
+def _format_heuristic_for_prompt(profile: IntentProfile) -> str:
+    """Serialize a heuristic IntentProfile as readable structured text for the LLM prompt."""
+    lines: list[str] = []
+
+    lines.append(f"repo_purpose: {profile.repo_purpose}")
+    if profile.deployment_context:
+        lines.append(f"deployment_context: {profile.deployment_context}")
+    if profile.pr_intent:
+        lines.append(f"pr_intent: {profile.pr_intent}")
+    if profile.risk_surface_change:
+        lines.append(f"risk_surface_change: {profile.risk_surface_change}")
+
+    if profile.intended_capabilities:
+        lines.append("intended_capabilities:")
+        for cap in profile.intended_capabilities:
+            lines.append(f"  - {cap}")
+
+    if profile.security_controls_detected:
+        lines.append("security_controls:")
+        for sc in profile.security_controls_detected:
+            lines.append(f"  - {sc.control_type} in {sc.location}: {sc.description}")
+
+    if profile.trust_boundaries:
+        lines.append("trust_boundaries:")
+        for tb in profile.trust_boundaries:
+            lines.append(f"  - {tb.name}: {tb.description}")
+            if tb.untrusted_inputs:
+                lines.append(f"    untrusted_inputs: {', '.join(tb.untrusted_inputs)}")
+            if tb.controls:
+                lines.append(f"    controls: {', '.join(tb.controls)}")
+
+    if profile.sensitive_paths:
+        lines.append("sensitive_paths:")
+        for sp in profile.sensitive_paths:
+            lines.append(f"  - {sp}")
+
+    return "\n".join(lines)
+
+
+def _parse_llm_response(data: dict) -> IntentProfile:
+    """Parse raw LLM JSON response into an IntentProfile."""
+    trust_boundaries = [
+        TrustBoundary(
+            name=tb.get("name", ""),
+            description=tb.get("description", ""),
+            untrusted_inputs=tb.get("untrusted_inputs", []),
+            controls=tb.get("controls", []),
+        )
+        for tb in data.get("trust_boundaries", [])
+    ]
+
+    security_controls = [
+        SecurityControl(
+            control_type=sc.get("control_type", ""),
+            location=sc.get("location", ""),
+            description=sc.get("description", ""),
+            covers=sc.get("covers", []),
+        )
+        for sc in data.get("security_controls", [])
+    ]
+
+    purpose = data.get("repo_purpose", "")
+    threat_summary = data.get("threat_summary", "")
+    if threat_summary:
+        purpose = f"{purpose}\n\nThreat summary: {threat_summary}"
+
+    return IntentProfile(
+        repo_purpose=purpose,
+        intended_capabilities=data.get("intended_capabilities", []),
+        trust_boundaries=trust_boundaries,
+        security_controls_detected=security_controls,
+        deployment_context=data.get("deployment_context"),
+        pr_intent=data.get("pr_intent", ""),
+        risk_surface_change=data.get("risk_surface_change", ""),
+        sensitive_paths=data.get("sensitive_paths", []),
+    )
+
+
+def _merge_profiles(heuristic: IntentProfile, llm: IntentProfile) -> IntentProfile:
+    """Merge heuristic and LLM IntentProfiles into a single enriched profile.
+
+    Strategy:
+    - Scalars (repo_purpose, deployment_context, pr_intent, risk_surface_change):
+      LLM overrides if non-empty, else heuristic preserved.
+    - Lists (intended_capabilities, sensitive_paths):
+      Union with deduplication, preserving order (heuristic first).
+    - trust_boundaries: merge by name — LLM overrides same-name boundaries,
+      heuristic-only boundaries are kept.
+    - security_controls_detected: merge by (control_type, location) key —
+      overlaps get LLM description + union of covers.
+    """
+    # Scalars: LLM wins if non-empty
+    repo_purpose = llm.repo_purpose if llm.repo_purpose else heuristic.repo_purpose
+    deployment_context = llm.deployment_context if llm.deployment_context else heuristic.deployment_context
+    pr_intent = llm.pr_intent if llm.pr_intent else heuristic.pr_intent
+    risk_surface_change = llm.risk_surface_change if llm.risk_surface_change else heuristic.risk_surface_change
+
+    # Lists: union with dedup (heuristic first)
+    capabilities = list(dict.fromkeys(
+        heuristic.intended_capabilities + llm.intended_capabilities
+    ))
+    sensitive_paths = list(dict.fromkeys(
+        heuristic.sensitive_paths + llm.sensitive_paths
+    ))
+
+    # Trust boundaries: merge by name
+    tb_map: dict[str, TrustBoundary] = {}
+    for tb in heuristic.trust_boundaries:
+        tb_map[tb.name] = tb
+    for tb in llm.trust_boundaries:
+        tb_map[tb.name] = tb  # LLM overrides same-name
+    trust_boundaries = list(tb_map.values())
+
+    # Security controls: merge by (control_type, location)
+    sc_map: dict[tuple[str, str], SecurityControl] = {}
+    for sc in heuristic.security_controls_detected:
+        sc_map[(sc.control_type, sc.location)] = sc
+    for sc in llm.security_controls_detected:
+        key = (sc.control_type, sc.location)
+        if key in sc_map:
+            # Overlap: LLM description + union of covers
+            existing = sc_map[key]
+            merged_covers = list(dict.fromkeys(existing.covers + sc.covers))
+            sc_map[key] = SecurityControl(
+                control_type=sc.control_type,
+                location=sc.location,
+                description=sc.description,
+                covers=merged_covers,
+            )
+        else:
+            sc_map[key] = sc
+    security_controls = list(sc_map.values())
+
+    return IntentProfile(
+        repo_purpose=repo_purpose,
+        intended_capabilities=capabilities,
+        trust_boundaries=trust_boundaries,
+        security_controls_detected=security_controls,
+        deployment_context=deployment_context,
+        pr_intent=pr_intent,
+        risk_surface_change=risk_surface_change,
+        sensitive_paths=sensitive_paths,
+    )
 
 
 def _extract_json(text: str) -> dict:

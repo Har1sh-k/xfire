@@ -167,8 +167,8 @@ class CrossFireOrchestrator:
         # 2. Intent inference — LLM threat model via Sonnet if available
         from crossfire.core.intent_inference import infer_with_llm
         if self._intent_agent is not None:
-            logger.info("pipeline.intent_inference", mode="llm")
-            intent = await infer_with_llm(context, self._intent_agent)
+            logger.info("pipeline.intent_inference", mode="llm_enriched")
+            intent = await infer_with_llm(context, self._intent_agent, self.intent_inferrer)
         else:
             logger.info("pipeline.intent_inference", mode="heuristic")
             intent = self.intent_inferrer.infer(context)
@@ -484,8 +484,8 @@ class CrossFireOrchestrator:
         if intent is None:
             from crossfire.core.intent_inference import infer_with_llm
             if self._intent_agent is not None:
-                logger.info("pipeline.intent_inference", mode="llm")
-                intent = await infer_with_llm(context, self._intent_agent)
+                logger.info("pipeline.intent_inference", mode="llm_enriched")
+                intent = await infer_with_llm(context, self._intent_agent, self.intent_inferrer)
             else:
                 logger.info("pipeline.intent_inference", mode="heuristic")
                 intent = self.intent_inferrer.infer(context)

@@ -244,7 +244,7 @@ class BaselineManager:
 
         if agent is not None:
             logger.info("baseline.intent_llm", agent=getattr(agent, "name", "?"))
-            intent = _asyncio.run(infer_with_llm(context, agent))
+            intent = _asyncio.run(infer_with_llm(context, agent, inferrer))
         else:
             logger.info("baseline.intent_heuristic")
             intent = inferrer.infer(context)
