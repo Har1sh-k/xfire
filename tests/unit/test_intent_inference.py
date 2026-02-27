@@ -496,7 +496,7 @@ class TestInferWithLlmEnrichment:
         )
 
         inferrer = IntentInferrer()
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             infer_with_llm(ctx, mock_agent, inferrer)
         )
 
@@ -526,7 +526,7 @@ class TestInferWithLlmEnrichment:
         )
 
         inferrer = IntentInferrer()
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             infer_with_llm(ctx, mock_agent, inferrer)
         )
 
@@ -542,7 +542,7 @@ class TestInferWithLlmEnrichment:
 
         ctx = _make_context(pr_title="Add feature", config_files={"requirements.txt": "flask\n"})
 
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             infer_with_llm(ctx, mock_agent)
         )
 

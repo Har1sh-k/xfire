@@ -422,9 +422,10 @@ class HackerUI:
 
     @staticmethod
     def _agent_icon(status: str) -> tuple[str, str]:
+        if status == "running":
+            return (_spinner(), "cyan")
         icons = {
             "pending": ("●", "dim"),
-            "running": ("◎", "cyan"),
             "done":    ("●", "green"),
             "error":   ("✗", "red"),
         }
