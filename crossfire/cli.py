@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import shutil
+from contextlib import nullcontext
 from pathlib import Path
 from typing import NoReturn
 
@@ -32,26 +33,28 @@ console = Console()
 _debug_collector: "DebugCollector | None" = None  # set by _apply_output_flags()
 
 
-def _apply_output_flags(silent: bool, debug: bool) -> "DebugCollector | None":
+def _apply_output_flags(
+    silent: bool, debug: bool
+) -> "tuple[DebugCollector | None, bool]":
     """Configure console + structlog for --silent / --debug modes.
 
-    Silent: suppresses all Rich output and structlog events.
-    Debug:  hooks a DebugCollector into structlog so every pipeline event
-            is captured; the collector is returned and must be passed to
-            write_debug_markdown() after the pipeline finishes.
+    Returns (collector, use_hacker_ui):
+      - collector: DebugCollector if debug mode, else None
+      - use_hacker_ui: True when HackerUI live display should be shown (normal mode only)
 
-    Must be called early in each command, before any logger.info() or
-    console.print() calls.
+    Silent: suppresses all Rich output and structlog events.
+    Debug:  hooks a DebugCollector into structlog; shows structured log output (no UI).
+    Normal: returns use_hacker_ui=True so callers set up HackerUI after loading settings.
+
+    Must be called early in each command, before any logger.info() or console.print() calls.
     """
     global console
-
-    collector = None
 
     if silent:
         import io as _io
         # Replace module-level console with a silent one
         console = Console(file=_io.StringIO(), quiet=True)
-        # Silence structlog — route all output to /dev/null
+        # Silence structlog — route all output to a black hole
         import structlog as _sl
         _sl.configure(
             processors=[_sl.processors.KeyValueRenderer()],
@@ -60,7 +63,7 @@ def _apply_output_flags(silent: bool, debug: bool) -> "DebugCollector | None":
             logger_factory=_sl.PrintLoggerFactory(file=_io.StringIO()),
             cache_logger_on_first_use=False,
         )
-        return None
+        return None, False
 
     if debug:
         import structlog as _sl
@@ -79,8 +82,10 @@ def _apply_output_flags(silent: bool, debug: bool) -> "DebugCollector | None":
             logger_factory=_sl.PrintLoggerFactory(),
             cache_logger_on_first_use=False,
         )
+        return collector, False
 
-    return collector
+    # Normal mode — HackerUI will be set up after settings are loaded
+    return None, True
 
 
 app = typer.Typer(
@@ -366,7 +371,7 @@ def analyze_pr(
     from crossfire.config.settings import ConfigError, load_settings
     from crossfire.core.orchestrator import CrossFireOrchestrator
 
-    _collector = _apply_output_flags(silent=silent, debug=debug)
+    _collector, _use_ui = _apply_output_flags(silent=silent, debug=debug)
 
     cli_overrides: dict = {}
     if context_depth:
@@ -386,14 +391,38 @@ def analyze_pr(
     if not github_token:
         _handle_error("GitHub token required. Set GITHUB_TOKEN or use --github-token.")
 
-    console.print(Panel(
-        f"[bold]CrossFire Security Review[/bold]\n"
-        f"Repo: {repo} | PR: #{pr}\n"
-        f"Agents: {', '.join(n for n, c in settings.agents.items() if c.enabled)}\n"
-        f"Context: {settings.analysis.context_depth} | Debate: {'skip' if skip_debate else 'enabled'}",
-        title="[ CrossFire ]",
-        border_style="red",
-    ))
+    enabled_agents = [n for n, c in settings.agents.items() if c.enabled]
+
+    _ui = None
+    if _use_ui:
+        from crossfire.cli_ui import HackerUI
+        import structlog as _sl
+        _ui = HackerUI(
+            repo=repo,
+            mode=f"pr #{pr}",
+            agents=enabled_agents,
+            debate_enabled=not skip_debate,
+            context_depth=settings.analysis.context_depth,
+            console=console,
+        )
+        _sl.configure(
+            processors=[_ui.processor],
+            wrapper_class=_sl.BoundLogger,
+            context_class=dict,
+            logger_factory=_sl.PrintLoggerFactory(),
+            cache_logger_on_first_use=False,
+        )
+        console.print(_ui.render_banner())
+        console.print(_ui.render_stats())
+    else:
+        console.print(Panel(
+            f"[bold]CrossFire Security Review[/bold]\n"
+            f"Repo: {repo} | PR: #{pr}\n"
+            f"Agents: {', '.join(enabled_agents)}\n"
+            f"Context: {settings.analysis.context_depth} | Debate: {'skip' if skip_debate else 'enabled'}",
+            title="[ CrossFire ]",
+            border_style="red",
+        ))
 
     if dry_run:
         console.print("[yellow]Dry run mode — would analyze the above, exiting.[/yellow]")
@@ -401,12 +430,13 @@ def analyze_pr(
 
     orchestrator = CrossFireOrchestrator(settings, cache_dir=cache_dir)
     try:
-        report = asyncio.run(orchestrator.analyze_pr(
-            repo=repo,
-            pr_number=pr,
-            github_token=github_token,
-            skip_debate=skip_debate,
-        ))
+        with (_ui if _ui is not None else nullcontext()):
+            report = asyncio.run(orchestrator.analyze_pr(
+                repo=repo,
+                pr_number=pr,
+                github_token=github_token,
+                skip_debate=skip_debate,
+            ))
     except Exception as e:
         _handle_error(f"Analysis failed: {e}", e)
 
@@ -467,7 +497,7 @@ def analyze_diff(
     from crossfire.core.orchestrator import CrossFireOrchestrator
 
     # Apply output mode flags early — before any console.print() or logger calls
-    _collector = _apply_output_flags(silent=silent, debug=debug)
+    _collector, _use_ui = _apply_output_flags(silent=silent, debug=debug)
 
     if not patch and not commit and not staged and not (base and head):
         _handle_error("Must specify --patch, --commit, --staged, or --base/--head.")
@@ -547,14 +577,38 @@ def analyze_diff(
     else:
         mode = "patch"
 
-    console.print(Panel(
-        f"[bold]CrossFire Security Review[/bold]\n"
-        f"Mode: {mode} | Repo: {repo_dir}\n"
-        f"Agents: {', '.join(n for n, c in settings.agents.items() if c.enabled)}\n"
-        f"Context: {settings.analysis.context_depth} | Debate: {'skip' if skip_debate else 'enabled'}",
-        title="[ CrossFire ]",
-        border_style="red",
-    ))
+    enabled_agents = [n for n, c in settings.agents.items() if c.enabled]
+
+    _ui = None
+    if _use_ui:
+        from crossfire.cli_ui import HackerUI
+        import structlog as _sl
+        _ui = HackerUI(
+            repo=repo_dir,
+            mode=mode,
+            agents=enabled_agents,
+            debate_enabled=not skip_debate,
+            context_depth=settings.analysis.context_depth,
+            console=console,
+        )
+        _sl.configure(
+            processors=[_ui.processor],
+            wrapper_class=_sl.BoundLogger,
+            context_class=dict,
+            logger_factory=_sl.PrintLoggerFactory(),
+            cache_logger_on_first_use=False,
+        )
+        console.print(_ui.render_banner())
+        console.print(_ui.render_stats())
+    else:
+        console.print(Panel(
+            f"[bold]CrossFire Security Review[/bold]\n"
+            f"Mode: {mode} | Repo: {repo_dir}\n"
+            f"Agents: {', '.join(enabled_agents)}\n"
+            f"Context: {settings.analysis.context_depth} | Debate: {'skip' if skip_debate else 'enabled'}",
+            title="[ CrossFire ]",
+            border_style="red",
+        ))
 
     if dry_run:
         console.print("[yellow]Dry run mode -- would analyze the above, exiting.[/yellow]")
@@ -564,14 +618,15 @@ def analyze_diff(
 
     orchestrator = CrossFireOrchestrator(settings, cache_dir=cache_dir)
     try:
-        report = asyncio.run(orchestrator.analyze_diff(
-            repo_dir=repo_dir,
-            patch_path=patch,
-            staged=staged,
-            base_ref=base,
-            head_ref=head,
-            skip_debate=skip_debate,
-        ))
+        with (_ui if _ui is not None else nullcontext()):
+            report = asyncio.run(orchestrator.analyze_diff(
+                repo_dir=repo_dir,
+                patch_path=patch,
+                staged=staged,
+                base_ref=base,
+                head_ref=head,
+                skip_debate=skip_debate,
+            ))
     except FileNotFoundError as e:
         _handle_error(str(e))
     except Exception as e:
@@ -614,7 +669,7 @@ def code_review(
     from crossfire.config.settings import ConfigError, load_settings
     from crossfire.core.orchestrator import CrossFireOrchestrator
 
-    _collector = _apply_output_flags(silent=silent, debug=debug)
+    _collector, _use_ui = _apply_output_flags(silent=silent, debug=debug)
 
     if verbose:
         import logging
@@ -635,20 +690,13 @@ def code_review(
         for cfg in settings.agents.values():
             cfg.enable_thinking = True
 
-    console.print(Panel(
-        f"[bold]CrossFire Code Review[/bold]\n"
-        f"Repo: {repo_dir} | Max files: {max_files}\n"
-        f"Agents: {', '.join(n for n, c in settings.agents.items() if c.enabled)}\n"
-        f"Debate: {'skip' if skip_debate else 'enabled'}",
-        title="[ CrossFire ]",
-        border_style="red",
-    ))
+    enabled_agents = [n for n, c in settings.agents.items() if c.enabled]
 
     if dry_run:
         console.print("[yellow]Dry run mode — would audit the above, exiting.[/yellow]")
         raise typer.Exit(0)
 
-    # Pre-flight: verify agents are reachable
+    # Pre-flight: verify agents are reachable (shown before live UI starts)
     console.print("[dim]Checking agent reachability...[/dim]")
     preflight = asyncio.run(_preflight_check(settings))
     any_ok = _print_preflight(preflight)
@@ -657,13 +705,45 @@ def code_review(
             "No agents are reachable. Check your CLI tool paths in .crossfire/config.yaml."
         )
 
+    _ui = None
+    if _use_ui:
+        from crossfire.cli_ui import HackerUI
+        import structlog as _sl
+        _ui = HackerUI(
+            repo=repo_dir,
+            mode="full-repo",
+            agents=enabled_agents,
+            debate_enabled=not skip_debate,
+            context_depth=settings.analysis.context_depth,
+            console=console,
+        )
+        _sl.configure(
+            processors=[_ui.processor],
+            wrapper_class=_sl.BoundLogger,
+            context_class=dict,
+            logger_factory=_sl.PrintLoggerFactory(),
+            cache_logger_on_first_use=False,
+        )
+        console.print(_ui.render_banner())
+        console.print(_ui.render_stats())
+    else:
+        console.print(Panel(
+            f"[bold]CrossFire Code Review[/bold]\n"
+            f"Repo: {repo_dir} | Max files: {max_files}\n"
+            f"Agents: {', '.join(enabled_agents)}\n"
+            f"Debate: {'skip' if skip_debate else 'enabled'}",
+            title="[ CrossFire ]",
+            border_style="red",
+        ))
+
     orchestrator = CrossFireOrchestrator(settings)
     try:
-        report = asyncio.run(orchestrator.code_review(
-            repo_dir=repo_dir,
-            max_files=max_files,
-            skip_debate=skip_debate,
-        ))
+        with (_ui if _ui is not None else nullcontext()):
+            report = asyncio.run(orchestrator.code_review(
+                repo_dir=repo_dir,
+                max_files=max_files,
+                skip_debate=skip_debate,
+            ))
     except Exception as e:
         _handle_error(f"Code review failed: {e}", e)
 
