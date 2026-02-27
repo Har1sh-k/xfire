@@ -344,11 +344,18 @@ def auth_status_rows(auth_path: Path | None = None) -> list[dict[str, str]]:
     """Build status rows for CLI display."""
     rows: list[dict[str, str]] = []
 
-    # Claude — setup-token only
+    # Claude — check CLI credentials first, then setup-token
     store = load_auth_store(auth_path)
+    cli_oauth = read_claude_cli_credentials()
     claude_token = store.tokens.get("claude")
-    if claude_token and claude_token.token.strip() and not _is_expired(claude_token.expires_at):
+
+    if cli_oauth:
         claude_status = "configured"
+        claude_source = "claude-cli"
+        claude_expires = "-"
+    elif claude_token and claude_token.token.strip() and not _is_expired(claude_token.expires_at):
+        claude_status = "configured"
+        claude_source = "setup-token"
         claude_expires = (
             time.strftime("%Y-%m-%d", time.localtime(claude_token.expires_at / 1000))
             if claude_token.expires_at
@@ -356,12 +363,13 @@ def auth_status_rows(auth_path: Path | None = None) -> list[dict[str, str]]:
         )
     else:
         claude_status = "missing"
+        claude_source = "missing"
         claude_expires = "-"
 
     rows.append(
         {
             "provider": "claude",
-            "source": "setup-token",
+            "source": claude_source,
             "status": claude_status,
             "expires": claude_expires,
         }
@@ -383,10 +391,13 @@ def auth_status_rows(auth_path: Path | None = None) -> list[dict[str, str]]:
         }
     )
 
-    # Gemini — prefer auth store, fall back to CLI file
+    # Gemini — check CLI file (including expiry) then auth store
+    gemini_cli = read_gemini_cli_credentials()
     gemini_token = get_gemini_access_token(auth_path=auth_path, refresh_if_needed=False)
     gemini_source = "missing"
     gemini_expires = "-"
+    gemini_status = "missing"
+
     if gemini_token:
         store_cred = store.oauth.get("gemini")
         if store_cred and store_cred.access_token.strip():
@@ -397,19 +408,28 @@ def auth_status_rows(auth_path: Path | None = None) -> list[dict[str, str]]:
                 )
         else:
             gemini_source = "gemini-cli"
-            cli_result = read_gemini_cli_credentials()
-            if cli_result:
-                _, expiry_ms = cli_result
+            if gemini_cli:
+                _, expiry_ms = gemini_cli
                 if expiry_ms:
                     gemini_expires = time.strftime(
                         "%Y-%m-%d", time.localtime(expiry_ms / 1000)
                     )
+        gemini_status = "configured"
+    elif gemini_cli:
+        # File exists but token is expired
+        gemini_source = "gemini-cli"
+        gemini_status = "expired"
+        _, expiry_ms = gemini_cli
+        if expiry_ms:
+            gemini_expires = time.strftime(
+                "%Y-%m-%d", time.localtime(expiry_ms / 1000)
+            )
 
     rows.append(
         {
             "provider": "gemini",
             "source": gemini_source,
-            "status": "configured" if gemini_token else "missing",
+            "status": gemini_status,
             "expires": gemini_expires,
         }
     )

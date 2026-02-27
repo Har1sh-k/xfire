@@ -38,16 +38,36 @@ class BaseAgent(ABC):
         # Callers may read this after execute() returns.
         self.thinking_trace: str | None = None
 
+    #: Set to "api" when CLI→API auto-fallback triggers (CLI binary not found).
+    effective_mode: str = "cli"
+
     async def execute(
         self,
         prompt: str,
         system_prompt: str,
         context_files: list[str] | None = None,
     ) -> str:
-        """Execute agent in configured mode, return raw response."""
+        """Execute agent in configured mode, return raw response.
+
+        If mode=cli and the CLI binary is not found in PATH, automatically
+        falls back to API mode so reviews still work without the CLIs installed.
+        """
         self.thinking_trace = None  # reset each call
+        self.effective_mode = self.config.mode
+
         if self.config.mode == "cli":
-            return await self._run_cli(prompt, system_prompt, context_files)
+            try:
+                return await self._run_cli(prompt, system_prompt, context_files)
+            except AgentError as e:
+                if "CLI command not found" in str(e):
+                    logger.warning(
+                        "agent.cli_fallback_to_api",
+                        agent=self.name,
+                        reason="CLI binary not in PATH",
+                    )
+                    self.effective_mode = "api"
+                    return await self._run_api(prompt, system_prompt, context_files)
+                raise
         else:
             return await self._run_api(prompt, system_prompt, context_files)
 

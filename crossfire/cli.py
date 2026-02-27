@@ -166,11 +166,33 @@ def auth_login(
     auth_path = resolve_auth_path()
 
     if provider_norm == "claude":
+        # Also check if Claude CLI credentials are available
+        from crossfire.auth import read_claude_cli_credentials
+        cli_cred = read_claude_cli_credentials()
+        if cli_cred:
+            console.print("[green]✓ Claude CLI credentials found in ~/.claude/.credentials.json[/green]")
+            console.print("[dim]CrossFire will use the OAuth token automatically when mode=api.[/dim]")
+            if not token:
+                console.print("")
+                console.print("[dim]Optionally also save an Anthropic setup-token for fallback:[/dim]")
         try:
-            setup_token = token or typer.prompt("Paste Anthropic setup-token", hide_input=True)
-            upsert_claude_setup_token(setup_token, auth_path=auth_path)
-            console.print("[green]✓ Claude setup-token saved.[/green]")
-            console.print(f"[dim]Auth store: {auth_path}[/dim]")
+            setup_token = token
+            if not setup_token:
+                try:
+                    setup_token = typer.prompt(
+                        "Paste Anthropic setup-token (or press Enter to skip)",
+                        hide_input=True,
+                        default="",
+                    )
+                except (typer.Abort, KeyboardInterrupt):
+                    setup_token = ""
+            if setup_token and setup_token.strip():
+                upsert_claude_setup_token(setup_token.strip(), auth_path=auth_path)
+                console.print("[green]✓ Claude setup-token saved.[/green]")
+                console.print(f"[dim]Auth store: {auth_path}[/dim]")
+            elif not cli_cred:
+                console.print("[yellow]No setup-token entered and no CLI credentials found.[/yellow]")
+                console.print("Set ANTHROPIC_API_KEY or log in with the Claude CLI.")
         except Exception as e:
             _handle_error(f"Failed to save Claude setup-token: {e}", e)
 
@@ -874,10 +896,10 @@ def test_llm(
     test_prompt = prompt or "Respond with exactly one word: hello"
     test_system = "You are a connectivity test. Respond as briefly as possible."
 
-    async def _test_agent(name: str, config) -> tuple[str, bool, str, float, str | None]:
+    async def _test_agent(name: str, config) -> tuple[str, bool, str, str, float, str | None]:
         cls = AGENT_CLASSES.get(name)
         if not cls:
-            return (name, False, f"unknown agent type: {name}", 0.0, None)
+            return (name, False, config.mode, f"unknown agent type: {name}", 0.0, None)
         agent = cls(config, repo_dir=repo_dir)
         t0 = _time.monotonic()
         try:
@@ -888,11 +910,14 @@ def test_llm(
             elapsed = _time.monotonic() - t0
             snippet = raw.strip().replace("\n", " ")[:60]
             thinking_preview = agent.thinking_trace[:80] if agent.thinking_trace else None
-            return (name, True, snippet, elapsed, thinking_preview)
+            used_mode = agent.effective_mode
+            if used_mode != config.mode:
+                used_mode = f"{config.mode}→{used_mode}"
+            return (name, True, used_mode, snippet, elapsed, thinking_preview)
         except asyncio.TimeoutError:
-            return (name, False, f"timed out after {timeout}s", _time.monotonic() - t0, None)
+            return (name, False, config.mode, f"timed out after {timeout}s", _time.monotonic() - t0, None)
         except Exception as e:
-            return (name, False, str(e)[:80], _time.monotonic() - t0, None)
+            return (name, False, config.mode, str(e)[:80], _time.monotonic() - t0, None)
 
     async def _run_all():
         return await asyncio.gather(*[_test_agent(n, c) for n, c in enabled.items()])
@@ -910,8 +935,7 @@ def test_llm(
 
     all_ok = True
     for row in results:
-        name, ok, msg, elapsed, thinking_preview = row
-        agent_mode = enabled[name].mode
+        name, ok, agent_mode, msg, elapsed, thinking_preview = row
         latency = f"{elapsed:.1f}s"
         status = "[green]connected[/green]" if ok else "[red]failed[/red]"
         row_cells = [name, agent_mode, status, msg, latency]
