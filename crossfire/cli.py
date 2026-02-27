@@ -11,13 +11,11 @@ from __future__ import annotations
 
 import json
 import shutil
-from contextlib import nullcontext
 from pathlib import Path
 from typing import NoReturn
 
 import typer
 from rich.console import Console
-from rich.panel import Panel
 
 from crossfire.auth import (
     auth_status_rows,
@@ -39,22 +37,21 @@ def _apply_output_flags(
     """Configure console + structlog for --silent / --debug modes.
 
     Returns (collector, use_hacker_ui):
-      - collector: DebugCollector if debug mode, else None
-      - use_hacker_ui: True when HackerUI live display should be shown (normal mode only)
+      - collector: DebugCollector if debug mode (captures all events for the .md file)
+      - use_hacker_ui: True for both normal and debug mode; False only for silent
 
-    Silent: suppresses all Rich output and structlog events.
-    Debug:  hooks a DebugCollector into structlog; shows structured log output (no UI).
-    Normal: returns use_hacker_ui=True so callers set up HackerUI after loading settings.
+    Silent: suppresses all output, exit code only.
+    Debug:  HackerUI shows with a live log section + debug .md written after pipeline.
+    Normal: HackerUI shows with phase spinners.
 
-    Must be called early in each command, before any logger.info() or console.print() calls.
+    structlog is NOT configured here in normal/debug mode — callers configure it
+    after creating the HackerUI so the processor chain is complete.
     """
     global console
 
     if silent:
         import io as _io
-        # Replace module-level console with a silent one
         console = Console(file=_io.StringIO(), quiet=True)
-        # Silence structlog — route all output to a black hole
         import structlog as _sl
         _sl.configure(
             processors=[_sl.processors.KeyValueRenderer()],
@@ -66,25 +63,9 @@ def _apply_output_flags(
         return None, False
 
     if debug:
-        import structlog as _sl
         from crossfire.output.debug_log import DebugCollector
-        collector = DebugCollector()
-        # Prepend capture processor before the existing rendering chain
-        _sl.configure(
-            processors=[
-                collector.processor,
-                _sl.stdlib.add_log_level,
-                _sl.processors.TimeStamper(fmt="iso"),
-                _sl.dev.ConsoleRenderer(),
-            ],
-            wrapper_class=_sl.BoundLogger,
-            context_class=dict,
-            logger_factory=_sl.PrintLoggerFactory(),
-            cache_logger_on_first_use=False,
-        )
-        return collector, False
+        return DebugCollector(), True
 
-    # Normal mode — HackerUI will be set up after settings are loaded
     return None, True
 
 
@@ -393,36 +374,34 @@ def analyze_pr(
 
     enabled_agents = [n for n, c in settings.agents.items() if c.enabled]
 
-    _ui = None
-    if _use_ui:
-        from crossfire.cli_ui import HackerUI
-        import structlog as _sl
-        _ui = HackerUI(
-            repo=repo,
-            mode=f"pr #{pr}",
-            agents=enabled_agents,
-            debate_enabled=not skip_debate,
-            context_depth=settings.analysis.context_depth,
-            console=console,
-        )
-        _sl.configure(
-            processors=[_ui.processor],
-            wrapper_class=_sl.BoundLogger,
-            context_class=dict,
-            logger_factory=_sl.PrintLoggerFactory(),
-            cache_logger_on_first_use=False,
-        )
-        console.print(_ui.render_banner())
-        console.print(_ui.render_stats())
-    else:
-        console.print(Panel(
-            f"[bold]CrossFire Security Review[/bold]\n"
-            f"Repo: {repo} | PR: #{pr}\n"
-            f"Agents: {', '.join(enabled_agents)}\n"
-            f"Context: {settings.analysis.context_depth} | Debate: {'skip' if skip_debate else 'enabled'}",
-            title="[ CrossFire ]",
-            border_style="red",
-        ))
+    from crossfire.cli_ui import HackerUI, render_banner, render_stats
+    import structlog as _sl
+    _ui = HackerUI(
+        repo=repo,
+        mode=f"pr #{pr}",
+        agents=enabled_agents,
+        debate_enabled=not skip_debate,
+        context_depth=settings.analysis.context_depth,
+        debug_mode=(_collector is not None),
+        console=console,
+    )
+    # processor chain: collector (if debug) → ui (captures + drops events)
+    processors = []
+    if _collector is not None:
+        processors.append(_collector.processor)
+    processors.append(_ui.processor)
+    _sl.configure(
+        processors=processors,
+        wrapper_class=_sl.BoundLogger,
+        context_class=dict,
+        logger_factory=_sl.PrintLoggerFactory(),
+        cache_logger_on_first_use=False,
+    )
+    console.print(render_banner())
+    console.print(render_stats(
+        repo=repo, mode=f"pr #{pr}", agents=enabled_agents,
+        debate_enabled=not skip_debate, context_depth=settings.analysis.context_depth,
+    ))
 
     if dry_run:
         console.print("[yellow]Dry run mode — would analyze the above, exiting.[/yellow]")
@@ -430,7 +409,7 @@ def analyze_pr(
 
     orchestrator = CrossFireOrchestrator(settings, cache_dir=cache_dir)
     try:
-        with (_ui if _ui is not None else nullcontext()):
+        with _ui:
             report = asyncio.run(orchestrator.analyze_pr(
                 repo=repo,
                 pr_number=pr,
@@ -579,36 +558,33 @@ def analyze_diff(
 
     enabled_agents = [n for n, c in settings.agents.items() if c.enabled]
 
-    _ui = None
-    if _use_ui:
-        from crossfire.cli_ui import HackerUI
-        import structlog as _sl
-        _ui = HackerUI(
-            repo=repo_dir,
-            mode=mode,
-            agents=enabled_agents,
-            debate_enabled=not skip_debate,
-            context_depth=settings.analysis.context_depth,
-            console=console,
-        )
-        _sl.configure(
-            processors=[_ui.processor],
-            wrapper_class=_sl.BoundLogger,
-            context_class=dict,
-            logger_factory=_sl.PrintLoggerFactory(),
-            cache_logger_on_first_use=False,
-        )
-        console.print(_ui.render_banner())
-        console.print(_ui.render_stats())
-    else:
-        console.print(Panel(
-            f"[bold]CrossFire Security Review[/bold]\n"
-            f"Mode: {mode} | Repo: {repo_dir}\n"
-            f"Agents: {', '.join(enabled_agents)}\n"
-            f"Context: {settings.analysis.context_depth} | Debate: {'skip' if skip_debate else 'enabled'}",
-            title="[ CrossFire ]",
-            border_style="red",
-        ))
+    from crossfire.cli_ui import HackerUI, render_banner, render_stats
+    import structlog as _sl
+    _ui = HackerUI(
+        repo=repo_dir,
+        mode=mode,
+        agents=enabled_agents,
+        debate_enabled=not skip_debate,
+        context_depth=settings.analysis.context_depth,
+        debug_mode=(_collector is not None),
+        console=console,
+    )
+    processors = []
+    if _collector is not None:
+        processors.append(_collector.processor)
+    processors.append(_ui.processor)
+    _sl.configure(
+        processors=processors,
+        wrapper_class=_sl.BoundLogger,
+        context_class=dict,
+        logger_factory=_sl.PrintLoggerFactory(),
+        cache_logger_on_first_use=False,
+    )
+    console.print(render_banner())
+    console.print(render_stats(
+        repo=repo_dir, mode=mode, agents=enabled_agents,
+        debate_enabled=not skip_debate, context_depth=settings.analysis.context_depth,
+    ))
 
     if dry_run:
         console.print("[yellow]Dry run mode -- would analyze the above, exiting.[/yellow]")
@@ -618,7 +594,7 @@ def analyze_diff(
 
     orchestrator = CrossFireOrchestrator(settings, cache_dir=cache_dir)
     try:
-        with (_ui if _ui is not None else nullcontext()):
+        with _ui:
             report = asyncio.run(orchestrator.analyze_diff(
                 repo_dir=repo_dir,
                 patch_path=patch,
@@ -705,40 +681,37 @@ def code_review(
             "No agents are reachable. Check your CLI tool paths in .crossfire/config.yaml."
         )
 
-    _ui = None
-    if _use_ui:
-        from crossfire.cli_ui import HackerUI
-        import structlog as _sl
-        _ui = HackerUI(
-            repo=repo_dir,
-            mode="full-repo",
-            agents=enabled_agents,
-            debate_enabled=not skip_debate,
-            context_depth=settings.analysis.context_depth,
-            console=console,
-        )
-        _sl.configure(
-            processors=[_ui.processor],
-            wrapper_class=_sl.BoundLogger,
-            context_class=dict,
-            logger_factory=_sl.PrintLoggerFactory(),
-            cache_logger_on_first_use=False,
-        )
-        console.print(_ui.render_banner())
-        console.print(_ui.render_stats())
-    else:
-        console.print(Panel(
-            f"[bold]CrossFire Code Review[/bold]\n"
-            f"Repo: {repo_dir} | Max files: {max_files}\n"
-            f"Agents: {', '.join(enabled_agents)}\n"
-            f"Debate: {'skip' if skip_debate else 'enabled'}",
-            title="[ CrossFire ]",
-            border_style="red",
-        ))
+    from crossfire.cli_ui import HackerUI, render_banner, render_stats
+    import structlog as _sl
+    _ui = HackerUI(
+        repo=repo_dir,
+        mode="full-repo",
+        agents=enabled_agents,
+        debate_enabled=not skip_debate,
+        context_depth=settings.analysis.context_depth,
+        debug_mode=(_collector is not None),
+        console=console,
+    )
+    processors = []
+    if _collector is not None:
+        processors.append(_collector.processor)
+    processors.append(_ui.processor)
+    _sl.configure(
+        processors=processors,
+        wrapper_class=_sl.BoundLogger,
+        context_class=dict,
+        logger_factory=_sl.PrintLoggerFactory(),
+        cache_logger_on_first_use=False,
+    )
+    console.print(render_banner())
+    console.print(render_stats(
+        repo=repo_dir, mode="full-repo", agents=enabled_agents,
+        debate_enabled=not skip_debate, context_depth=settings.analysis.context_depth,
+    ))
 
     orchestrator = CrossFireOrchestrator(settings)
     try:
-        with (_ui if _ui is not None else nullcontext()):
+        with _ui:
             report = asyncio.run(orchestrator.code_review(
                 repo_dir=repo_dir,
                 max_files=max_files,
@@ -800,12 +773,9 @@ def baseline(
             pass
         return
 
-    console.print(Panel(
-        f"[bold]CrossFire Baseline Builder[/bold]\n"
-        f"Repo: {repo_dir}",
-        title="[ CrossFire ]",
-        border_style="yellow",
-    ))
+    from crossfire.cli_ui import render_banner, render_stats
+    console.print(render_banner())
+    console.print(render_stats(repo=repo_dir, mode="baseline"))
 
     import asyncio
 
@@ -938,17 +908,19 @@ def scan(
 
     base_label = diff_result.base_commit[:12] if diff_result.base_commit else "unknown"
     head_label = diff_result.head_commit[:12] if diff_result.head_commit else "unknown"
-    console.print(Panel(
-        f"[bold]CrossFire Scan[/bold]\n"
-        f"Repo: {repo_dir} | Range: {mode_desc}\n"
-        f"Base: {base_label} → Head: {head_label} | "
-        f"Diff: {diff_result.diff_text.count(chr(10))} lines\n"
-        f"Baseline built from: {base_label} (state before diff)\n"
-        f"Agents: {', '.join(n for n, c in settings.agents.items() if c.enabled)}\n"
-        f"Context: {settings.analysis.context_depth} | Debate: {'skip' if skip_debate else 'enabled'}",
-        title="[ CrossFire ]",
-        border_style="red",
+    from crossfire.cli_ui import render_banner, render_stats
+    enabled_agents_scan = [n for n, c in settings.agents.items() if c.enabled]
+    console.print(render_banner())
+    console.print(render_stats(
+        repo=repo_dir, mode=f"scan {mode_desc}",
+        agents=enabled_agents_scan,
+        debate_enabled=not skip_debate,
+        context_depth=settings.analysis.context_depth,
     ))
+    console.print(
+        f"  [dim]base:[/dim] {base_label}  [dim]→  head:[/dim] {head_label}  "
+        f"[dim]diff:[/dim] {diff_result.diff_text.count(chr(10))} lines\n"
+    )
 
     if dry_run:
         console.print("[yellow]Dry run mode — would scan the above, exiting.[/yellow]")
@@ -1168,19 +1140,28 @@ def test_llm(
     if not enabled:
         _handle_error("No agents are enabled. Check .crossfire/config.yaml.")
 
+    from crossfire.cli_ui import AgentTestUI, render_banner, render_stats
+
     mode_summary = f"mode={mode}" if mode else "default mode"
-    console.print(
-        f"[dim]Testing {len(enabled)} agent(s): {', '.join(enabled.keys())} "
-        f"({mode_summary})[/dim]\n"
-    )
+    console.print(render_banner())
+    console.print(render_stats(
+        repo=repo_dir, mode=f"test-llm  ·  {mode_summary}",
+        agents=list(enabled.keys()),
+        debate_enabled=False,
+        context_depth="—",
+    ))
 
     test_prompt = prompt or "Are you ready?"
     test_system = "You are a connectivity test. Respond as briefly as possible."
 
+    _test_ui = AgentTestUI(agents=list(enabled.keys()), console=console)
+
     async def _test_agent(name: str, config) -> tuple[str, bool, str, str, float, str | None, str]:
         cls = AGENT_CLASSES.get(name)
         if not cls:
+            _test_ui.set_done(name, False, f"unknown agent type: {name}")
             return (name, False, config.mode, f"unknown agent type: {name}", 0.0, None, "")
+        _test_ui.set_testing(name)
         agent = cls(config, repo_dir=repo_dir)
         t0 = _time.monotonic()
         try:
@@ -1194,41 +1175,53 @@ def test_llm(
             used_mode = agent.effective_mode
             if used_mode != config.mode:
                 used_mode = f"{config.mode}→{used_mode}"
+            _test_ui.set_done(name, True, snippet)
             return (name, True, used_mode, snippet, elapsed, thinking_preview, raw.strip())
         except asyncio.TimeoutError:
             used_mode = agent.effective_mode
             if used_mode != config.mode:
                 used_mode = f"{config.mode}→{used_mode}"
+            _test_ui.set_done(name, False, f"timed out after {timeout}s")
             return (name, False, used_mode, f"timed out after {timeout}s", _time.monotonic() - t0, None, "")
         except Exception as e:
             used_mode = agent.effective_mode
             if used_mode != config.mode:
                 used_mode = f"{config.mode}→{used_mode}"
+            _test_ui.set_done(name, False, str(e)[:55])
             return (name, False, used_mode, str(e)[:80], _time.monotonic() - t0, None, "")
 
     async def _run_all():
         return await asyncio.gather(*[_test_agent(n, c) for n, c in enabled.items()])
 
-    results = asyncio.run(_run_all())
+    with _test_ui:
+        results = asyncio.run(_run_all())
 
-    table = Table(title="LLM Connectivity Test", border_style="dim")
-    table.add_column("Agent", style="bold")
-    table.add_column("Mode")
-    table.add_column("Status")
-    table.add_column("Response", style="dim")
-    table.add_column("Latency", justify="right")
+    # Hacker-styled results table
+    table = Table(
+        title="[bold cyan]agent connectivity[/bold cyan]",
+        border_style="cyan",
+        header_style="bold cyan",
+    )
+    table.add_column("agent", style="bold")
+    table.add_column("mode", style="dim")
+    table.add_column("status")
+    table.add_column("response", style="dim")
+    table.add_column("latency", justify="right", style="dim")
     if thinking:
-        table.add_column("Thinking preview", style="dim")
+        table.add_column("thinking", style="dim")
 
     all_ok = True
     full_responses: list[tuple[str, str]] = []
     for row in results:
         name, ok, agent_mode, msg, elapsed, thinking_preview, full_response = row
         latency = f"{elapsed:.1f}s"
-        status = "[green]connected[/green]" if ok else "[red]failed[/red]"
+        if ok:
+            status = "[bold green]✓  connected[/bold green]"
+        else:
+            status = "[bold red]✗  failed[/bold red]"
         row_cells = [name, agent_mode, status, msg, latency]
         if thinking:
-            row_cells.append(thinking_preview or "-")
+            row_cells.append(thinking_preview or "—")
         table.add_row(*row_cells)
         if not ok:
             all_ok = False
@@ -1237,17 +1230,22 @@ def test_llm(
 
     console.print(table)
 
-    # Print each agent's full response
+    # Full responses in hacker style
     if full_responses:
         console.print("")
         for agent_name, response in full_responses:
-            console.print(f"[bold]{agent_name}:[/bold] {response}")
+            console.print(f"  [cyan]+[/cyan] [bold]{agent_name}[/bold]  {response}")
 
+    console.print("")
     if all_ok:
-        console.print(f"\n[green]All {len(enabled)} agent(s) connected successfully.[/green]")
+        console.print(
+            f"  [cyan]+[/cyan] [bold green]all {len(enabled)} agent(s) operational[/bold green]"
+        )
     else:
         failed = sum(1 for _, ok, *_ in results if not ok)
-        console.print(f"\n[red]{failed}/{len(enabled)} agent(s) failed.[/red]")
+        console.print(
+            f"  [cyan]+[/cyan] [bold red]{failed}/{len(enabled)} agent(s) failed[/bold red]"
+        )
         raise typer.Exit(1)
 
 
@@ -1275,12 +1273,9 @@ def demo(
     from crossfire.core.models import PRContext
     from crossfire.core.orchestrator import CrossFireOrchestrator
 
-    console.print(Panel(
-        f"[bold]CrossFire Demo[/bold]\n"
-        f"Fixture: {fixture}",
-        title="[ CrossFire ]",
-        border_style="red",
-    ))
+    from crossfire.cli_ui import render_banner, render_stats
+    console.print(render_banner())
+    console.print(render_stats(repo=f"fixture/{fixture}", mode="demo"))
 
     # Load fixture data
     diff_path = fixtures_dir / "diff.patch"
