@@ -25,14 +25,13 @@ class CodexAgent(BaseAgent):
         system_prompt: str,
         context_files: list[str] | None,
     ) -> str:
-        """Run via Codex CLI.
+        """Run via Codex CLI non-interactively using ``codex exec <prompt>``.
 
         The Codex CLI is natively agentic and has its own file access.
         It runs in the repo directory (cwd=self.repo_dir set by BaseAgent).
         """
-        cmd = [self.config.cli_command]
         full_prompt = f"{system_prompt}\n\n{prompt}" if system_prompt else prompt
-        cmd.extend(["-q", full_prompt])
+        cmd = [self.config.cli_command, "exec", full_prompt]
         cmd.extend(self.config.cli_args)
         return await self._run_subprocess(cmd)
 

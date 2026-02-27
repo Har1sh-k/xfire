@@ -43,7 +43,7 @@ class TestCodexAdapter:
         assert result == '{"findings":[]}'
         cmd = mock.call_args[0][0]
         assert cmd[0] == "codex"
-        assert "-q" in cmd
+        assert "exec" in cmd
 
     @pytest.mark.asyncio
     async def test_api_mode(self):
