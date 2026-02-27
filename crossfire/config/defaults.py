@@ -16,10 +16,10 @@ DEFAULT_CONFIG: dict = {
             "enabled": True,
             "mode": "cli",
             "cli_command": "claude",
-            "cli_args": ["--output-format", "json"],
+            "cli_args": [],
             "model": "claude-sonnet-4-20250514",
             "api_key_env": "ANTHROPIC_API_KEY",
-            "timeout": 300,
+            "timeout": 600,
         },
         "codex": {
             "enabled": True,

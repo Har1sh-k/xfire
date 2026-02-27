@@ -44,8 +44,9 @@ class CodexAgent(BaseAgent):
             "--skip-git-repo-check",
         ]
         cmd.extend(self.config.cli_args)
-        cmd.append(full_prompt)
-        raw = await self._run_subprocess(cmd)
+        # Pass prompt via stdin to avoid Windows CreateProcess 32K command-line limit.
+        # codex exec reads from stdin when no positional prompt arg is given.
+        raw = await self._run_subprocess(cmd, stdin_data=full_prompt)
         # Codex outputs JSONL with --json; extract the final text message
         return self._parse_jsonl_output(raw)
 

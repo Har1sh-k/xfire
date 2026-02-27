@@ -35,9 +35,10 @@ class GeminiAgent(BaseAgent):
         """
         cmd = [self.config.cli_command]
         full_prompt = f"{system_prompt}\n\n{prompt}" if system_prompt else prompt
-        cmd.append(full_prompt)
         cmd.extend(self.config.cli_args)
-        return await self._run_subprocess(cmd)
+        # Pass prompt via stdin to avoid Windows CreateProcess 32K command-line limit.
+        # The Gemini CLI reads from stdin when no positional prompt arg is given.
+        return await self._run_subprocess(cmd, stdin_data=full_prompt)
 
     @staticmethod
     def _extract_text(payload: dict) -> str | None:

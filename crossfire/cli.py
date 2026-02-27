@@ -1001,13 +1001,13 @@ def test_llm(
         f"({mode_summary})[/dim]\n"
     )
 
-    test_prompt = prompt or "Respond with exactly one word: hello"
+    test_prompt = prompt or "Are you ready?"
     test_system = "You are a connectivity test. Respond as briefly as possible."
 
-    async def _test_agent(name: str, config) -> tuple[str, bool, str, str, float, str | None]:
+    async def _test_agent(name: str, config) -> tuple[str, bool, str, str, float, str | None, str]:
         cls = AGENT_CLASSES.get(name)
         if not cls:
-            return (name, False, config.mode, f"unknown agent type: {name}", 0.0, None)
+            return (name, False, config.mode, f"unknown agent type: {name}", 0.0, None, "")
         agent = cls(config, repo_dir=repo_dir)
         t0 = _time.monotonic()
         try:
@@ -1021,17 +1021,17 @@ def test_llm(
             used_mode = agent.effective_mode
             if used_mode != config.mode:
                 used_mode = f"{config.mode}→{used_mode}"
-            return (name, True, used_mode, snippet, elapsed, thinking_preview)
+            return (name, True, used_mode, snippet, elapsed, thinking_preview, raw.strip())
         except asyncio.TimeoutError:
             used_mode = agent.effective_mode
             if used_mode != config.mode:
                 used_mode = f"{config.mode}→{used_mode}"
-            return (name, False, used_mode, f"timed out after {timeout}s", _time.monotonic() - t0, None)
+            return (name, False, used_mode, f"timed out after {timeout}s", _time.monotonic() - t0, None, "")
         except Exception as e:
             used_mode = agent.effective_mode
             if used_mode != config.mode:
                 used_mode = f"{config.mode}→{used_mode}"
-            return (name, False, used_mode, str(e)[:80], _time.monotonic() - t0, None)
+            return (name, False, used_mode, str(e)[:80], _time.monotonic() - t0, None, "")
 
     async def _run_all():
         return await asyncio.gather(*[_test_agent(n, c) for n, c in enabled.items()])
@@ -1048,8 +1048,9 @@ def test_llm(
         table.add_column("Thinking preview", style="dim")
 
     all_ok = True
+    full_responses: list[tuple[str, str]] = []
     for row in results:
-        name, ok, agent_mode, msg, elapsed, thinking_preview = row
+        name, ok, agent_mode, msg, elapsed, thinking_preview, full_response = row
         latency = f"{elapsed:.1f}s"
         status = "[green]connected[/green]" if ok else "[red]failed[/red]"
         row_cells = [name, agent_mode, status, msg, latency]
@@ -1058,8 +1059,16 @@ def test_llm(
         table.add_row(*row_cells)
         if not ok:
             all_ok = False
+        if ok and full_response:
+            full_responses.append((name, full_response))
 
     console.print(table)
+
+    # Print each agent's full response
+    if full_responses:
+        console.print("")
+        for agent_name, response in full_responses:
+            console.print(f"[bold]{agent_name}:[/bold] {response}")
 
     if all_ok:
         console.print(f"\n[green]All {len(enabled)} agent(s) connected successfully.[/green]")
