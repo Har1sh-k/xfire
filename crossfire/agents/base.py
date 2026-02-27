@@ -122,9 +122,20 @@ class BaseAgent(ABC):
         raise AgentError(self.name, f"Could not parse JSON from response (length={len(raw)})")
 
     async def _run_subprocess(
-        self, cmd: list[str], timeout: int | None = None
+        self,
+        cmd: list[str],
+        timeout: int | None = None,
+        stdin_data: str | None = None,
     ) -> str:
-        """Run a subprocess asynchronously with timeout."""
+        """Run a subprocess asynchronously with timeout.
+
+        Args:
+            cmd: Command and arguments.
+            timeout: Override config timeout.
+            stdin_data: If provided, written to the process stdin instead of
+                DEVNULL.  Use this to pass large prompts on Windows where the
+                CreateProcess command-line limit is 32,768 characters.
+        """
         import os
         import shutil
         import sys
@@ -148,17 +159,19 @@ class BaseAgent(ABC):
 
         logger.info("agent.subprocess.start", agent=self.name, cmd=cmd[0])
 
+        stdin_mode = asyncio.subprocess.PIPE if stdin_data else asyncio.subprocess.DEVNULL
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
-                stdin=asyncio.subprocess.DEVNULL,
+                stdin=stdin_mode,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 env=os.environ,
                 cwd=self.repo_dir or None,
             )
+            input_bytes = stdin_data.encode("utf-8") if stdin_data else None
             stdout, stderr = await asyncio.wait_for(
-                proc.communicate(), timeout=timeout
+                proc.communicate(input=input_bytes), timeout=timeout
             )
 
             if proc.returncode != 0:

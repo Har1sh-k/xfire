@@ -8,7 +8,7 @@ import structlog
 
 from crossfire.agents.base import AgentError, BaseAgent
 from crossfire.agents.tools import CLAUDE_TOOLS, MAX_TOOL_ITERATIONS, execute_tool
-from crossfire.auth import get_claude_setup_token, read_claude_cli_credentials
+from crossfire.auth import get_claude_setup_token
 
 logger = structlog.get_logger()
 
@@ -29,15 +29,19 @@ class ClaudeAgent(BaseAgent):
     ) -> str:
         """Run via Claude Code CLI with read-only agentic file access.
 
-        Claude Code CLI is natively agentic — it reads, searches, and navigates
-        the repository using its built-in tools.  --add-dir grants access and
-        --disallowedTools blocks write operations.
+        Prompt is passed via stdin to avoid Windows CreateProcess 32K
+        command-line limit (ERROR_FILENAME_EXCED_RANGE → FileNotFoundError).
+
+        Flags mirror OpenClaw's DEFAULT_CLAUDE_BACKEND:
+          claude -p --output-format json --dangerously-skip-permissions
+        with --append-system-prompt and --add-dir added for CrossFire.
         """
         cmd = [self.config.cli_command]
-        cmd.extend(["-p", prompt, "--output-format", "json"])
+        # -p without a value = non-interactive mode, reads prompt from stdin
+        cmd.extend(["-p", "--output-format", "json", "--dangerously-skip-permissions"])
 
         if system_prompt:
-            cmd.extend(["--system-prompt", system_prompt])
+            cmd.extend(["--append-system-prompt", system_prompt])
 
         if self.repo_dir:
             cmd.extend(["--add-dir", self.repo_dir])
@@ -45,7 +49,8 @@ class ClaudeAgent(BaseAgent):
         cmd.extend(["--disallowedTools", ",".join(_WRITE_TOOLS)])
         cmd.extend(self.config.cli_args)
 
-        return await self._run_subprocess(cmd)
+        # Pass prompt via stdin — avoids Windows 32K command-line limit
+        return await self._run_subprocess(cmd, stdin_data=prompt)
 
     async def _run_api(
         self,
@@ -79,22 +84,19 @@ class ClaudeAgent(BaseAgent):
                 client = anthropic.AsyncAnthropic(api_key=setup_token, timeout=self.config.timeout)
                 auth_label = "setup_token"
             else:
-                oauth_token = read_claude_cli_credentials()
-                if oauth_token:
-                    client = anthropic.AsyncAnthropic(
-                        auth_token=oauth_token, timeout=self.config.timeout
-                    )
-                    auth_label = "cli_oauth"
-                else:
-                    raise AgentError(
-                        self.name,
-                        (
-                            f"No credentials found. Options:\n"
-                            f"  1. Set {self.config.api_key_env} env var.\n"
-                            f"  2. Run `crossfire auth login --provider claude`.\n"
-                            f"  3. Log in with the Claude CLI (auto-detected)."
-                        ),
-                    )
+                # NOTE: The Claude CLI OAuth token (~/.claude/.credentials.json)
+                # does NOT work with api.anthropic.com — Anthropic explicitly
+                # rejects it with "OAuth authentication is currently not supported."
+                # Users need a real ANTHROPIC_API_KEY for API mode.
+                raise AgentError(
+                    self.name,
+                    (
+                        f"No credentials found for API mode. Options:\n"
+                        f"  1. Set {self.config.api_key_env} env var (get key at console.anthropic.com).\n"
+                        f"  2. Run `crossfire auth login --provider claude` to store a setup-token.\n"
+                        f"  Note: CLI mode (default) uses your Claude Code login automatically."
+                    ),
+                )
 
         logger.info("agent.api.start", agent=self.name, model=self.config.model, auth=auth_label)
 
