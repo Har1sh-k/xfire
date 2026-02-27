@@ -177,6 +177,7 @@ class HackerUI:
         debate_enabled: bool = True,
         context_depth: str = "deep",
         debug_mode: bool = False,
+        show_debate: bool = False,
         console: Console | None = None,
     ) -> None:
         self._repo = repo
@@ -185,7 +186,11 @@ class HackerUI:
         self._debate_enabled = debate_enabled
         self._context_depth = context_depth
         self._debug_mode = debug_mode
+        self._show_debate = show_debate
         self._console = console or Console()
+        # Live debate state (tracked across argument events)
+        self._debate_live_finding: str = ""
+        self._debate_live_round: int = 0
 
         # Phase state: "pending" | "running" | "done" | "error"
         self._phase_status: dict[str, str] = {p: "pending" for p, _ in _PHASES}
@@ -309,6 +314,15 @@ class HackerUI:
             elif event == "pipeline.all_agents_failed":
                 self._warnings.append("All agents failed — review incomplete")
 
+            # Capture live debate event data (must copy before lock releases)
+            _debate_arg_event: dict | None = None
+            _debate_verdict_event: dict | None = None
+            if self._show_debate:
+                if event == "debate.argument":
+                    _debate_arg_event = dict(event_dict)
+                elif event == "debate.verdict":
+                    _debate_verdict_event = dict(event_dict)
+
             # Debug live log
             if self._debug_mode:
                 ts = time.strftime("%H:%M:%S")
@@ -322,6 +336,12 @@ class HackerUI:
                 if len(self._debug_events) > _DEBUG_LOG_MAX:
                     self._debug_events.pop(0)
 
+        # Render live debate bubbles above the Live area (outside lock)
+        if _debate_arg_event is not None:
+            self._print_debate_argument(_debate_arg_event)
+        if _debate_verdict_event is not None:
+            self._print_debate_verdict(_debate_verdict_event)
+
         # Trigger an immediate refresh so phase transitions appear instantly
         # (the renderable itself always calls _render() fresh on each tick)
         try:
@@ -330,6 +350,62 @@ class HackerUI:
             pass  # Never let UI errors crash the pipeline
 
         raise structlog.DropEvent()
+
+    def _print_debate_argument(self, event_dict: dict) -> None:
+        """Print one debate speech bubble above the Live area."""
+        from crossfire.output.debate_view import _RESPONSE_INDENT, _bubble
+        from rich.rule import Rule
+
+        agent = str(event_dict.get("agent", ""))
+        role = str(event_dict.get("role", ""))
+        position = str(event_dict.get("position", ""))
+        argument = str(event_dict.get("argument", ""))
+        finding = str(event_dict.get("finding", ""))
+
+        # Section headers before the bubble
+        if role == "prosecution":
+            self._console.print("")
+            self._console.print(Rule(
+                f"  ⚔  {finding[:55]}{'…' if len(finding) > 55 else ''}  ",
+                style="dim red", characters="─",
+            ))
+            self._console.print(Rule("  round 1  ", style="dim", characters="─"))
+            self._console.print("")
+        elif role == "rebuttal":
+            self._console.print(Rule("  round 2  ", style="dim", characters="─"))
+            self._console.print("")
+        elif role == "judge":
+            self._console.print(Rule("  verdict  ", style="dim white", characters="─"))
+            self._console.print("")
+
+        indent = _RESPONSE_INDENT if role in ("defense", "counter") else 0
+        _bubble(self._console, agent, role, position, argument,
+                indent=indent, is_judge=(role == "judge"))
+
+    def _print_debate_verdict(self, event_dict: dict) -> None:
+        """Print the consensus verdict panel above the Live area."""
+        from rich.panel import Panel
+        from rich.text import Text
+        from crossfire.output.debate_view import _CONSENSUS_CONFIG, _SEVERITY_STYLE
+
+        consensus = str(event_dict.get("consensus", "")).lower()
+        severity = str(event_dict.get("final_severity", "")).lower()
+        evidence = str(event_dict.get("evidence_quality", "—"))
+
+        text_style, border_style = _CONSENSUS_CONFIG.get(consensus, ("bold white", "white"))
+        sev_style = _SEVERITY_STYLE.get(severity, "white")
+
+        verdict = Text(justify="center")
+        verdict.append(f"  {consensus.upper()}  ", style=text_style)
+        verdict.append("─", style="dim")
+        verdict.append("  severity: ", style="dim")
+        verdict.append(severity.upper(), style=sev_style)
+        verdict.append("  ─  evidence: ", style="dim")
+        verdict.append(evidence, style="cyan")
+        verdict.append("  ")
+
+        self._console.print(Panel(verdict, border_style=border_style, padding=(0, 2)))
+        self._console.print("")
 
     def __enter__(self) -> "HackerUI":
         self._live.start()

@@ -384,6 +384,7 @@ def analyze_pr(
         debate_enabled=not skip_debate,
         context_depth=settings.analysis.context_depth,
         debug_mode=(_collector is not None),
+        show_debate=debate,
         console=console,
     )
     # processor chain: collector (if debug) → ui (captures + drops events)
@@ -432,10 +433,6 @@ def analyze_pr(
         report, format, output, post_comment,
         repo=repo, pr_number=pr, github_token=github_token,
     )
-
-    if debate:
-        from crossfire.output.debate_view import render_debates
-        render_debates(report, console)
 
     _check_severity_gate(report, settings)
 
@@ -573,6 +570,7 @@ def analyze_diff(
         debate_enabled=not skip_debate,
         context_depth=settings.analysis.context_depth,
         debug_mode=(_collector is not None),
+        show_debate=debate,
         console=console,
     )
     processors = []
@@ -627,10 +625,6 @@ def analyze_diff(
         console.print(f"[dim]Debug log written → {debug_path}[/dim]")
 
     _output_report(report, format, output, False)
-
-    if debate:
-        from crossfire.output.debate_view import render_debates
-        render_debates(report, console)
 
     _check_severity_gate(report, settings)
 
@@ -701,6 +695,7 @@ def code_review(
         debate_enabled=not skip_debate,
         context_depth=settings.analysis.context_depth,
         debug_mode=(_collector is not None),
+        show_debate=debate,
         console=console,
     )
     processors = []
@@ -741,10 +736,6 @@ def code_review(
         console.print(f"[dim]Debug log written → {debug_path}[/dim]")
 
     _output_report(report, format, output, False)
-
-    if debate:
-        from crossfire.output.debate_view import render_debates
-        render_debates(report, console)
 
     _check_severity_gate(report, settings)
 

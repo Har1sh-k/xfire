@@ -266,6 +266,15 @@ class DebateEngine:
             context_summary,
             intent_summary,
         )
+        if prosecutor_argument:
+            logger.info(
+                "debate.argument",
+                finding=finding.title,
+                agent=prosecutor_name,
+                role="prosecution",
+                position=prosecutor_argument.position,
+                argument=prosecutor_argument.argument,
+            )
 
         # ── Round 1: Defense ──
         defense_argument = await self._run_defense(
@@ -277,6 +286,16 @@ class DebateEngine:
             context_summary,
             intent_summary,
         )
+
+        if defense_argument:
+            logger.info(
+                "debate.argument",
+                finding=finding.title,
+                agent=defense_name,
+                role="defense",
+                position=defense_argument.position,
+                argument=defense_argument.argument,
+            )
 
         if not prosecutor_argument or not defense_argument:
             return None
@@ -317,6 +336,13 @@ class DebateEngine:
                 defense_concedes=defense_concedes,
                 consensus=debate.consensus.value,
             )
+            logger.info(
+                "debate.verdict",
+                finding=finding.title,
+                consensus=debate.consensus.value,
+                final_severity=debate.final_severity.value,
+                evidence_quality=debate.evidence_quality or "—",
+            )
             return debate
 
         # ── 3-agent mode: defense concedes → judge verdicts immediately ──
@@ -331,6 +357,15 @@ class DebateEngine:
                 None,
                 intent_summary,
             )
+            if judge_argument:
+                logger.info(
+                    "debate.argument",
+                    finding=finding.title,
+                    agent=judge_name,
+                    role="judge",
+                    position=judge_argument.position,
+                    argument=judge_argument.argument,
+                )
         else:
             # ── Round 2: Judge-led clarification ──
             logger.info("debate.round2_start", finding=finding.title)
@@ -366,6 +401,25 @@ class DebateEngine:
                 r2_pros_task, r2_def_task,
             )
 
+            if round_2_prosecution:
+                logger.info(
+                    "debate.argument",
+                    finding=finding.title,
+                    agent=prosecutor_name,
+                    role="rebuttal",
+                    position=round_2_prosecution.position,
+                    argument=round_2_prosecution.argument,
+                )
+            if round_2_defense:
+                logger.info(
+                    "debate.argument",
+                    finding=finding.title,
+                    agent=defense_name,
+                    role="counter",
+                    position=round_2_defense.position,
+                    argument=round_2_defense.argument,
+                )
+
             # Judge makes final ruling with all context
             judge_argument, judge_raw = await self._run_judge_final(
                 agents.get(judge_name),
@@ -378,6 +432,15 @@ class DebateEngine:
                 round_2_defense.argument if round_2_defense else "",
                 intent_summary,
             )
+            if judge_argument:
+                logger.info(
+                    "debate.argument",
+                    finding=finding.title,
+                    agent=judge_name,
+                    role="judge",
+                    position=judge_argument.position,
+                    argument=judge_argument.argument,
+                )
 
         if not judge_argument:
             return None
@@ -414,6 +477,13 @@ class DebateEngine:
             finding=finding.title,
             rounds=rounds_used,
             consensus=debate.consensus.value,
+        )
+        logger.info(
+            "debate.verdict",
+            finding=finding.title,
+            consensus=debate.consensus.value,
+            final_severity=debate.final_severity.value,
+            evidence_quality=debate.evidence_quality or "—",
         )
 
         return debate
