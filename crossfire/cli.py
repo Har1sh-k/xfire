@@ -1354,7 +1354,7 @@ def demo(
 
     # ── UI demo mode ──────────────────────────────────────────────────────────
     if ui or scenario:
-        from crossfire.demo.scenarios import SCENARIOS, SCENARIO_LABELS
+        from crossfire.demo.scenarios import SCENARIOS
 
         targets: list[str]
         if scenario:
