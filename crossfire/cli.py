@@ -1323,11 +1323,75 @@ def test_llm(
 
 @app.command()
 def demo(
-    fixture: str = typer.Option(..., help="Fixture name (e.g., auth_bypass_regression)"),
+    fixture: str = typer.Option(
+        "", help="Fixture name (e.g., auth_bypass_regression). Omit to run the UI demo."
+    ),
+    ui: bool = typer.Option(
+        False, "--ui", help="Run synthetic UI demo scenarios (no LLM calls)."
+    ),
+    scenario: str = typer.Option(
+        "",
+        "--scenario",
+        help="Run one UI scenario: both_accept | judge_questions | defender_wins",
+    ),
     format: str = typer.Option("markdown", help="Output format: markdown|json|sarif"),
     verbose: bool = typer.Option(False, help="Enable verbose logging"),
 ) -> None:
-    """Run analysis against a fixture PR for testing/demo."""
+    """Run analysis against a fixture PR, or play back synthetic UI demo scenarios.
+
+    \b
+    UI demo (no LLM calls):
+      crossfire demo --ui                          # all 3 scenarios
+      crossfire demo --ui --scenario both_accept   # one scenario
+
+    \b
+    Fixture-based demo (real pipeline):
+      crossfire demo --fixture auth_bypass_regression
+    """
+    import asyncio
+    from rich.console import Console as _Console
+    from rich.text import Text as _Text
+
+    # ── UI demo mode ──────────────────────────────────────────────────────────
+    if ui or scenario:
+        from tests.demo.scenarios import SCENARIOS, SCENARIO_LABELS
+
+        targets: list[str]
+        if scenario:
+            if scenario not in SCENARIOS:
+                console.print(f"[red]Unknown scenario:[/red] {scenario}")
+                console.print(f"Available: {', '.join(SCENARIOS)}")
+                raise typer.Exit(1)
+            targets = [scenario]
+        else:
+            targets = list(SCENARIOS)
+
+        demo_console = _Console()
+
+        async def _run_all() -> None:
+            for i, name in enumerate(targets):
+                fn = SCENARIOS[name]
+                await fn(demo_console)  # type: ignore[call-arg]
+                if i < len(targets) - 1:
+                    # Brief pause between scenarios
+                    for tick in range(3, 0, -1):
+                        t = _Text()
+                        t.append(f"\n  next scenario in {tick}s…", style="dim cyan")
+                        demo_console.print(t)
+                        await asyncio.sleep(1.0)
+                    demo_console.clear()
+
+        try:
+            asyncio.run(_run_all())
+        except KeyboardInterrupt:
+            pass
+        return
+
+    # ── Fixture-based demo mode ───────────────────────────────────────────────
+    if not fixture:
+        console.print("[red]Error:[/red] Provide --fixture <name> or use --ui for the UI demo.")
+        raise typer.Exit(1)
+
     fixtures_dir = Path(__file__).parent.parent / "tests" / "fixtures" / "prs" / fixture
     if not fixtures_dir.exists():
         console.print(f"[red]Error:[/red] Fixture not found: {fixture}")
@@ -1337,8 +1401,6 @@ def demo(
         ]
         console.print(f"Available fixtures: {', '.join(available)}")
         raise typer.Exit(1)
-
-    import asyncio
 
     from crossfire.config.settings import load_settings
     from crossfire.core.context_builder import parse_diff
