@@ -208,5 +208,6 @@ __marimo__/
 
 # CrossFire generated files
 crossfire-debug-*.md
+results.md
 .crossfire/auth.json
 .crossfire/baseline/

@@ -22,7 +22,7 @@ format:
 	ruff format crossfire/ tests/
 
 demo:
-	crossfire demo --fixture auth_bypass_regression
+	crossfire demo --ui
 
 demo-github:
 	crossfire analyze-pr --repo owner/repo --pr 1
