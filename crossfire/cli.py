@@ -11,8 +11,15 @@ from __future__ import annotations
 
 import json
 import shutil
+import warnings
 from pathlib import Path
 from typing import NoReturn
+
+# Suppress asyncio ProactorEventLoop pipe-transport cleanup noise on Windows.
+# When Ctrl+C kills a subprocess, the __del__ on the transport tries to log a
+# ResourceWarning but the pipe is already closed → ValueError printed to stderr.
+# These are harmless GC artifacts, not real resource leaks.
+warnings.filterwarnings("ignore", category=ResourceWarning, module="asyncio")
 
 import typer
 from rich.console import Console
@@ -418,6 +425,9 @@ def analyze_pr(
                 github_token=github_token,
                 skip_debate=skip_debate,
             ))
+    except KeyboardInterrupt:
+        console.print("\n[yellow]  Interrupted.[/yellow]")
+        raise typer.Exit(130)
     except Exception as e:
         _handle_error(f"Analysis failed: {e}", e)
 
@@ -607,6 +617,11 @@ def analyze_diff(
                 head_ref=head,
                 skip_debate=skip_debate,
             ))
+    except KeyboardInterrupt:
+        console.print("\n[yellow]  Interrupted.[/yellow]")
+        if _tmp_patch_file:
+            Path(_tmp_patch_file).unlink(missing_ok=True)
+        raise typer.Exit(130)
     except FileNotFoundError as e:
         _handle_error(str(e))
     except Exception as e:
@@ -723,6 +738,9 @@ def code_review(
                 max_files=max_files,
                 skip_debate=skip_debate,
             ))
+    except KeyboardInterrupt:
+        console.print("\n[yellow]  Interrupted.[/yellow]")
+        raise typer.Exit(130)
     except Exception as e:
         _handle_error(f"Code review failed: {e}", e)
 
@@ -1009,6 +1027,9 @@ def scan(
             fast_model=fast_model,
             skip_debate=skip_debate,
         ))
+    except KeyboardInterrupt:
+        console.print("\n[yellow]  Interrupted.[/yellow]")
+        raise typer.Exit(130)
     except Exception as e:
         _handle_error(f"Scan failed: {e}", e)
 

@@ -223,6 +223,7 @@ class DebateEngine:
         logger.info(
             "debate.start",
             finding=finding.title,
+            severity=finding.severity.value,
             prosecutor=prosecutor_name,
             defense=defense_name,
             judge=judge_name,
@@ -379,6 +380,14 @@ class DebateEngine:
                 defense_argument.argument,
                 intent_summary,
             )
+
+            if judge_questions_text:
+                logger.info(
+                    "debate.judge_questions",
+                    finding=finding.title,
+                    agent=judge_name,
+                    questions=judge_questions_text,
+                )
 
             # Both sides respond to judge's questions (parallel)
             import asyncio

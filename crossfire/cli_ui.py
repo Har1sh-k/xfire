@@ -199,6 +199,7 @@ class HackerUI:
         # Live debate state (tracked across argument events)
         self._debate_live_finding: str = ""
         self._debate_live_round: int = 0
+        self._debate_live_severity: str = ""
 
         # Phase state: "pending" | "running" | "done" | "error"
         self._phase_status: dict[str, str] = {p: "pending" for p, _ in _PHASES}
@@ -310,6 +311,7 @@ class HackerUI:
                 finding = str(event_dict.get("finding", ""))
                 self._debate_current = finding[:50] + ("…" if len(finding) > 50 else "")
                 self._debate_count += 1
+                self._debate_live_severity = str(event_dict.get("severity", ""))
 
             elif event == "debate.complete":
                 self._debate_done += 1
@@ -325,11 +327,14 @@ class HackerUI:
             # Capture live debate event data (must copy before lock releases)
             _debate_arg_event: dict | None = None
             _debate_verdict_event: dict | None = None
+            _debate_jq_event: dict | None = None
             if self._show_debate:
                 if event == "debate.argument":
                     _debate_arg_event = dict(event_dict)
                 elif event == "debate.verdict":
                     _debate_verdict_event = dict(event_dict)
+                elif event == "debate.judge_questions":
+                    _debate_jq_event = dict(event_dict)
 
             # Debug live log
             if self._debug_mode:
@@ -347,6 +352,8 @@ class HackerUI:
         # Render live debate bubbles above the Live area (outside lock)
         if _debate_arg_event is not None:
             self._print_debate_argument(_debate_arg_event)
+        if _debate_jq_event is not None:
+            self._print_judge_questions(_debate_jq_event)
         if _debate_verdict_event is not None:
             self._print_debate_verdict(_debate_verdict_event)
 
@@ -373,10 +380,23 @@ class HackerUI:
         # Section headers before the bubble
         if role == "prosecution":
             self._console.print("")
-            self._console.print(Rule(
-                f"  ⚔  {finding[:55]}{'…' if len(finding) > 55 else ''}  ",
-                style="dim red", characters="─",
-            ))
+            _sev_styles = {
+                "critical": "bold red", "high": "red",
+                "medium": "yellow", "low": "dim green", "info": "dim",
+            }
+            sev = self._debate_live_severity
+            rule_title = Text()
+            rule_title.append(
+                f"  ⚔  {finding[:50]}{'…' if len(finding) > 50 else ''}  ",
+                style="dim red",
+            )
+            if sev:
+                rule_title.append(
+                    f"[{sev.upper()}]",
+                    style=_sev_styles.get(sev.lower(), "white"),
+                )
+                rule_title.append("  ", style="dim")
+            self._console.print(Rule(rule_title, style="dim red", characters="─"))
             self._console.print(Rule("  round 1  ", style="dim", characters="─"))
             self._console.print("")
         elif role == "rebuttal":
@@ -414,6 +434,34 @@ class HackerUI:
 
         self._console.print(Panel(verdict, border_style=border_style, padding=(0, 2)))
         self._console.print("")
+
+    def _print_judge_questions(self, event_dict: dict) -> None:
+        """Print judge's clarifying questions as a dim indented blockquote panel."""
+        from rich.padding import Padding
+        from rich.panel import Panel
+
+        agent = str(event_dict.get("agent", ""))
+        questions = str(event_dict.get("questions", ""))
+
+        if not questions.strip():
+            return
+
+        self._console.print(Rule("  judge questions  ", style="dim", characters="─"))
+        self._console.print("")
+
+        header = Text()
+        header.append("  ⚖  ", style="dim")
+        header.append(agent.upper(), style="dim")
+        header.append("  [clarifying questions for round 2]", style="dim")
+
+        panel = Panel(
+            Text(questions, style="dim"),
+            border_style="dim",
+            padding=(0, 2),
+        )
+
+        self._console.print(Padding(header, pad=(0, 0, 0, 4)))
+        self._console.print(Padding(panel, pad=(0, 0, 1, 4)))
 
     def __enter__(self) -> "HackerUI":
         self._live.start()
