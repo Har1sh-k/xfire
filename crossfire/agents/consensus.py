@@ -93,19 +93,24 @@ def compute_consensus(
     else:
         outcome = ConsensusOutcome.UNCLEAR
 
+    # Check unanimity: defense conceded (both sides agree finding is real)
+    defense_concedes = defense.position.lower() in ("real_issue", "confirmed", "agree", "concede")
+
     # Cross-check with other positions
     if outcome == ConsensusOutcome.CONFIRMED:
-        # If defense also says real_issue → unanimous, very high confidence
-        if defense.position.lower() in ("real_issue", "confirmed"):
+        # If defense also says real_issue → unanimous, boost confidence
+        if defense_concedes:
             debate.final_confidence = min(debate.final_confidence + 0.15, 0.99)
 
         # Weak prosecution evidence → downgrade to Likely
-        if prosecution_quality < 0.4:
+        # Waived when unanimous: defense concession is stronger than citation count
+        if prosecution_quality < 0.4 and not defense_concedes:
             logger.info("consensus.downgrade", reason="weak prosecution evidence")
             outcome = ConsensusOutcome.LIKELY
 
         # Minimum evidence threshold: need 2+ cited evidence items
-        if len(prosecutor.cited_evidence) < 2:
+        # Waived when unanimous: all agents agree, no need for citation-count gate
+        if len(prosecutor.cited_evidence) < 2 and not defense_concedes:
             if outcome == ConsensusOutcome.CONFIRMED:
                 outcome = ConsensusOutcome.LIKELY
 
