@@ -88,13 +88,13 @@ Run `crossfire init` to generate `.crossfire/config.yaml`. The key settings:
 agents:
   claude:
     enabled: true
-    mode: api          # api | cli
+    mode: cli          # cli | api
   codex:
     enabled: true
-    mode: api
+    mode: cli
   gemini:
     enabled: true
-    mode: api
+    mode: cli
 
 severity_gate:
   fail_on: high        # minimum severity to fail CI
