@@ -247,7 +247,7 @@ def _read_file_safe(path: str | Path, max_size: int = 1_000_000) -> str | None:
         p = Path(path)
         if p.stat().st_size > max_size:
             return None
-        return p.read_text(errors="replace")
+        return p.read_text(encoding="utf-8", errors="replace")
     except (OSError, UnicodeDecodeError):
         return None
 
@@ -591,7 +591,7 @@ class ContextBuilder:
         p = Path(patch_path)
         if not p.exists():
             raise FileNotFoundError(f"Patch file not found: {patch_path}")
-        diff_text = p.read_text(errors="replace")
+        diff_text = p.read_text(encoding="utf-8", errors="replace")
         return self.build_from_diff(
             diff_text=diff_text,
             repo_dir=repo_dir,

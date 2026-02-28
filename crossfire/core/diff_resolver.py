@@ -157,7 +157,7 @@ class DiffResolver:
         if not p.exists():
             raise DiffResolverError(f"Patch file not found: {patch_path}")
 
-        diff_text = p.read_text(errors="replace")
+        diff_text = p.read_text(encoding="utf-8", errors="replace")
         head_commit = _get_head(repo_dir)
 
         logger.info(
