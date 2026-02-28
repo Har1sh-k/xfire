@@ -963,7 +963,7 @@ Two modes — `--ui` (synthetic, no LLM calls) or `--fixture` (real pipeline):
 cli.py demo(fixture, ui, scenario, format, verbose)
 │
 ├─ [--ui / --scenario]  ── UI demo mode (no LLM calls)
-│   ├─ from tests.demo.scenarios import SCENARIOS
+│   ├─ from crossfire.demo.scenarios import SCENARIOS
 │   ├─ targets = [scenario] or all 3 keys
 │   └─ asyncio.run(_run_all())
 │       └─ for each scenario fn(console):
