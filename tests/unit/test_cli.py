@@ -126,6 +126,56 @@ class TestOutputReport:
         assert out_file.exists()
         assert "test/repo" in out_file.read_text(encoding="utf-8")
 
+    def test_markdown_write_unicode_emoji(self, tmp_path):
+        """Regression: Windows CP1252 UnicodeEncodeError when report contains emoji."""
+        finding = Finding(
+            title="🔥 SQL Injection",
+            description="User input reaches DB 🚨",
+            severity=Severity.HIGH,
+            category=FindingCategory.SQL_INJECTION,
+            status=FindingStatus.CONFIRMED,
+            file_path="app.py",
+            confidence=0.9,
+        )
+        report = _make_report(findings=[finding])
+        out_file = tmp_path / "report.md"
+        # Must not raise UnicodeEncodeError on Windows
+        _output_report(report, "markdown", str(out_file), False)
+        assert out_file.exists()
+        content = out_file.read_text(encoding="utf-8")
+        assert "SQL Injection" in content
+
+
+class TestPrintJudgeQuestions:
+    """Regression: 'name Rule is not defined' in _print_judge_questions."""
+
+    def test_renders_without_error(self):
+        from io import StringIO
+        from rich.console import Console
+        from crossfire.cli_ui import HackerUI
+
+        buf = StringIO()
+        console = Console(file=buf, highlight=False)
+        ui = HackerUI(show_debate=True, console=console)
+        # Must not raise NameError for Rule
+        ui._print_judge_questions({
+            "agent": "claude",
+            "questions": "1. Is the check on line 42 sufficient?\n2. Can token be None here?",
+        })
+        output = buf.getvalue()
+        assert "judge questions" in output.lower()
+
+    def test_skips_empty_questions(self):
+        from io import StringIO
+        from rich.console import Console
+        from crossfire.cli_ui import HackerUI
+
+        buf = StringIO()
+        console = Console(file=buf, highlight=False)
+        ui = HackerUI(show_debate=True, console=console)
+        ui._print_judge_questions({"agent": "claude", "questions": "   "})
+        assert buf.getvalue() == ""
+
 
 class TestDefaultConfigYaml:
     def test_contains_expected_sections(self):

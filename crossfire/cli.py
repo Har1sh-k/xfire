@@ -1070,7 +1070,7 @@ def report(
         _handle_error(f"Input file not found: {input}")
 
     try:
-        data = json.loads(input_path.read_text())
+        data = json.loads(input_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as e:
         _handle_error(f"Invalid JSON in {input}: {e}")
 
@@ -1101,7 +1101,7 @@ def debates(
         _handle_error(f"Input file not found: {input}")
 
     try:
-        data = json.loads(input_path.read_text())
+        data = json.loads(input_path.read_text(encoding="utf-8"))
         cf_report = CrossFireReport(**data)
     except Exception as e:
         _handle_error(f"Failed to load report: {e}", e)
@@ -1125,7 +1125,7 @@ def init() -> None:
     if example.exists():
         shutil.copy(example, config_file)
     else:
-        config_file.write_text(_default_config_yaml())
+        config_file.write_text(_default_config_yaml(), encoding="utf-8")
 
     console.print("[green]Created .crossfire/config.yaml[/green]")
     console.print("Edit the config to customize your security review settings.")
@@ -1356,13 +1356,13 @@ def demo(
     if not diff_path.exists():
         _handle_error(f"diff.patch not found in fixture {fixture}")
 
-    diff_text = diff_path.read_text(errors="replace")
+    diff_text = diff_path.read_text(encoding="utf-8", errors="replace")
     files = parse_diff(diff_text)
 
     # Load context metadata
     context_meta: dict = {}
     if context_path.exists():
-        context_meta = json.loads(context_path.read_text())
+        context_meta = json.loads(context_path.read_text(encoding="utf-8"))
 
     pr_context = PRContext(
         repo_name=context_meta.get("repo_name", f"fixture/{fixture}"),
@@ -1433,7 +1433,7 @@ def _output_report(
     if output_path:
         out = Path(output_path)
         out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(content)
+        out.write_text(content, encoding="utf-8")
         console.print(f"[green]Report written to {output_path}[/green]")
     else:
         console.print(content)

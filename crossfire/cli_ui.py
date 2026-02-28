@@ -439,6 +439,7 @@ class HackerUI:
         """Print judge's clarifying questions as a dim indented blockquote panel."""
         from rich.padding import Padding
         from rich.panel import Panel
+        from rich.rule import Rule
 
         agent = str(event_dict.get("agent", ""))
         questions = str(event_dict.get("questions", ""))
