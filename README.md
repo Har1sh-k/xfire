@@ -7,7 +7,7 @@
 ![PyPI - coming soon](https://img.shields.io/badge/pypi-coming%20soon-lightgrey)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
 [![License: GPL v3](https://img.shields.io/badge/license-GPLv3-blue)](LICENSE)
-[![CI](https://img.shields.io/github/actions/workflow/status/Har1sh-k/CrossFire/ci.yml?branch=main&label=CI)](https://github.com/Har1sh-k/CrossFire/actions)
+[![CI](https://img.shields.io/github/actions/workflow/status/Har1sh-k/CrossFire/crossfire.yml?branch=main&label=CI)](https://github.com/Har1sh-k/CrossFire/actions)
 [![Substack](https://img.shields.io/badge/substack-subscribe-orange?logo=substack)](https://substack.com/@har1shk)
 
 </div>
