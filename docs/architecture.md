@@ -2,7 +2,7 @@
 
 > Generated from source code analysis. Reflects what the code **actually does**.
 >
-> Last updated: 2026-02-27
+> Last updated: 2026-02-28
 
 ---
 
@@ -218,9 +218,9 @@ crossfire scan . --base main --head feature
 
 | Component | File | Purpose (from code) | Status | Internal Dependencies |
 |-----------|------|---------------------|--------|-----------------------|
-| **CLI Entry Point** | `crossfire/cli.py` | Typer app with 12+ commands: `code-review`, `analyze-pr`, `analyze-diff`, `baseline`, `scan`, `report`, `init`, `config-check`, `demo`, `test-llm`, `auth login`, `auth status`, `debates`. `code-review` runs the whole-repo Code Review Pipeline. `baseline` builds `.crossfire/baseline/`. `scan` supports 6 input modes, auto-builds baseline, and prints delta summary. All pipeline commands accept `--debug` (live log + markdown file), `--silent` (suppress output), `--debate` (render debate chat after results), `--format`, `--output`. `test-llm` tests every configured agent with `AgentTestUI`. `debates` re-renders debate chat from saved JSON. | ✅ IMPLEMENTED | `config.settings`, `core.orchestrator`, `core.baseline`, `core.diff_resolver`, `agents.fast_model`, `core.models`, `core.severity`, `core.context_builder`, `output.*`, `integrations.github.comment_poster`, `cli_ui`, `auth.store` |
-| **Live UI** | `crossfire/cli_ui.py` | Terminal display layer. `HackerUI` — `rich.live.Live`-based phase spinner: animates braille frames (`⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏`) via `int(time.monotonic() * 8)`, shows per-agent status, optional `debug_mode` live-log ring buffer (last 8 events) appended to the display. `AgentTestUI` — `transient=True` Live display for `test-llm`, per-agent `set_testing()`/`set_done()`. Module-level `render_banner()` and `render_stats()` for commands that don't need phase spinners. structlog `processor()` method: buffers events (debug) and raises `structlog.DropEvent()` to suppress stdout during pipeline. | ✅ IMPLEMENTED | `rich.live`, `rich.text`, `structlog` |
-| **Debate Chat Renderer** | `crossfire/output/debate_view.py` | `render_debates(report, console)` renders all debates as a hacker-style terminal chat. Prosecution: left-aligned, red `rich.panel.Panel`. Defense: indented 6 spaces via `rich.padding.Padding`, cyan border. Judge: bright-white border, ⚖ icon. Consensus box: colored by outcome (confirmed=red, rejected=green, modified/inconclusive=yellow). Each `_bubble()` call renders agent header + bordered panel for one speech turn. `--debate` flag on pipeline commands and `crossfire debates --input` both call this. | ✅ IMPLEMENTED | `rich.console`, `rich.panel`, `rich.padding`, `rich.rule`, `rich.text` |
+| **CLI Entry Point** | `crossfire/cli.py` | Typer app with 12+ commands: `code-review`, `analyze-pr`, `analyze-diff`, `baseline`, `scan`, `report`, `init`, `config-check`, `demo`, `test-llm`, `auth login`, `auth status`, `debates`. `code-review` runs the whole-repo Code Review Pipeline. `baseline` builds `.crossfire/baseline/`. `scan` supports 6 input modes, auto-builds baseline, and prints delta summary. All pipeline commands accept `--debug` (live log + markdown file), `--silent` (suppress output), `--debate` (stream live debate chat as each agent responds), `--format`, `--output`. `test-llm` tests every configured agent with `AgentTestUI`. `debates` re-renders debate chat from saved JSON. | ✅ IMPLEMENTED | `config.settings`, `core.orchestrator`, `core.baseline`, `core.diff_resolver`, `agents.fast_model`, `core.models`, `core.severity`, `core.context_builder`, `output.*`, `integrations.github.comment_poster`, `cli_ui`, `auth.store` |
+| **Live UI** | `crossfire/cli_ui.py` | Terminal display layer. `HackerUI` — `rich.live.Live`-based display: braille phase spinner (`⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏`) at 10fps; rotating-circle agent icons (`◐◓◑◒`) at 6fps (visually distinct). `show_debate=True` streams live debate chat by intercepting `debate.argument`, `debate.judge_questions`, and `debate.verdict` structlog events above the Live area: `_print_debate_argument()` renders speech bubbles with severity badge `[HIGH]`/`[CRITICAL]` on the finding header; `_print_judge_questions()` renders a dim indented blockquote panel (not a speech bubble); `_print_debate_verdict()` renders a colored consensus panel. Optional `debug_mode` live-log ring buffer (last 8 events). structlog `processor()` raises `structlog.DropEvent()` to suppress stdout during pipeline. `AgentTestUI` — `transient=True` Live display for `test-llm`. Module-level `render_banner()` and `render_stats()`. | ✅ IMPLEMENTED | `rich.live`, `rich.text`, `rich.panel`, `rich.padding`, `structlog` |
+| **Debate Chat Renderer** | `crossfire/output/debate_view.py` | `render_debates(report, console)` renders all debates as a hacker-style terminal chat. Prosecution: left-aligned, red `rich.panel.Panel`. Defense: indented 6 spaces via `rich.padding.Padding`, cyan border. Judge: bright-white border, ⚖ icon. Consensus box: colored by outcome (confirmed=red, rejected=green, modified/inconclusive=yellow). Internal helpers (`_bubble()`, `_CONSENSUS_CONFIG`, `_SEVERITY_STYLE`, `_RESPONSE_INDENT`) are imported by `HackerUI` for live streaming. `render_debates()` itself is called only by `crossfire debates --input`. | ✅ IMPLEMENTED | `rich.console`, `rich.panel`, `rich.padding`, `rich.rule`, `rich.text` |
 | **Debug Log Writer** | `crossfire/output/debug_log.py` | `DebugCollector` — thread-safe structlog processor that buffers all pipeline log events in memory (time, level, event, extras). `write_debug_markdown(report, collector, command_info)` writes a timestamped markdown file (`crossfire-debug-YYYYMMDD-HHMMSS.md`) containing: pipeline events table, intent profile, context summary, full agent reviews with reasoning traces, debate transcripts, and the complete final report. Called by `--debug` flag on pipeline commands. | ✅ IMPLEMENTED | `threading`, `pathlib`, `output.markdown_report` |
 | **Auth Store** | `crossfire/auth/store.py` | `AuthStore` Pydantic model persisted at `.crossfire/auth.json`. Stores OAuth tokens and CLI credentials for Claude, Codex, and Gemini. CLI commands: `crossfire auth login --provider <name> [--token <val>]`, `crossfire auth status`. | ✅ IMPLEMENTED | `pydantic`, `pathlib` |
 | **Default Config** | `crossfire/config/defaults.py` | `DEFAULT_CONFIG` dict — nested default values for all settings, including `fast_model` section | ✅ IMPLEMENTED | _(none)_ |
@@ -488,15 +488,13 @@ flowchart TD
     CMD_REPORT -->|"_output_report(report, fmt)"| MD_RPT
 
     %% Live UI wiring
-    CMD_CR -->|"HackerUI(debug_mode=...)"| HACKER_UI
-    CMD_PR -->|"HackerUI(debug_mode=...)"| HACKER_UI
-    CMD_DIFF -->|"HackerUI(debug_mode=...)"| HACKER_UI
+    CMD_CR -->|"HackerUI(show_debate=..., debug_mode=...)"| HACKER_UI
+    CMD_PR -->|"HackerUI(show_debate=..., debug_mode=...)"| HACKER_UI
+    CMD_DIFF -->|"HackerUI(show_debate=..., debug_mode=...)"| HACKER_UI
     CMD_TESTLLM -->|"AgentTestUI()"| HACKER_UI
     HACKER_UI -->|"--debug: DebugCollector in processor chain"| DEBUG_COLL
+    HACKER_UI -->|"--debate: live bubble streaming"| DEBATE_VIEW
     DEBUG_COLL -->|"write_debug_markdown(report)"| MD_RPT
-    CMD_CR -->|"--debate: render_debates(report)"| DEBATE_VIEW
-    CMD_PR -->|"--debate: render_debates(report)"| DEBATE_VIEW
-    CMD_DIFF -->|"--debate: render_debates(report)"| DEBATE_VIEW
     CMD_DEBATES -->|"render_debates(report)"| DEBATE_VIEW
 
     %% Auth wiring
@@ -1459,8 +1457,13 @@ Fallback: await asyncio.wait_for(
 All pipeline commands now show a live phase-by-phase status display using `rich.live.Live`.
 
 **`HackerUI`** — wraps the entire pipeline:
-- Phase list with animated braille spinner (`⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏`) for the active phase, `✓`/`✗` for completed
-- Per-agent status icons (`◉ claude`, `◉ codex`, `◉ gemini`) with running/done/error states
+- Phase list with animated braille spinner (`⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏`) at 10fps for the active phase, `✓`/`✗` for completed
+- Per-agent rows use a rotating-circle spinner (`◐◓◑◒`) at 6fps — visually distinct from the phase spinner
+- `show_debate=True` enables live debate streaming: intercepts `debate.argument`, `debate.judge_questions`, and `debate.verdict` structlog events and renders them above the Live area via `console.print()` (Rich handles thread safety):
+  - `_print_debate_argument()` — speech bubble with coloured severity badge (`[HIGH]`/`[CRITICAL]`) on the finding header rule
+  - `_print_judge_questions()` — dim indented blockquote `Panel` (not a speech bubble, visually distinct)
+  - `_print_debate_verdict()` — consensus outcome `Panel` coloured by verdict
+- `debate.start` event now includes `severity` field so the header badge is available before the first argument arrives
 - `debug_mode=True` appends a live-log section showing last 8 structlog events from a ring buffer
 - `processor()` method slots into structlog processor chain: buffers events (debug) and raises `structlog.DropEvent()` to suppress stdout during pipeline
 
@@ -1494,9 +1497,9 @@ Layout:
 - Judge speech: bright-white `Panel` with ⚖ icon, full width
 - Consensus box: `Panel` colored by outcome — confirmed=red, rejected=green, modified/inconclusive=yellow
 
-Triggered by:
-- `--debate` flag on `code-review`, `analyze-pr`, `analyze-diff`
-- `crossfire debates --input results.json` command
+Used by:
+- `crossfire debates --input results.json` — replays a saved JSON result as a full chat transcript
+- `HackerUI` internally (when `--debate` is passed to pipeline commands) imports `_bubble()`, `_CONSENSUS_CONFIG`, `_SEVERITY_STYLE`, and `_RESPONSE_INDENT` for live streaming above the Live area
 
 ---
 
@@ -1565,4 +1568,4 @@ CLI commands:
 | `crossfire debates --input` | Re-renders debate chat from a saved JSON result file |
 | `--debug` (pipeline cmds) | Shows live log display + writes `crossfire-debug-*.md` to CWD |
 | `--silent` (pipeline cmds) | Suppresses all output (structlog → `/dev/null`) |
-| `--debate` (pipeline cmds) | Renders debate chat viewer after pipeline completes |
+| `--debate` (pipeline cmds) | Streams live debate chat as each agent responds — shows severity badge, judge questions, and consensus verdict in real time |

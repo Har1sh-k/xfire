@@ -71,7 +71,7 @@ crossfire analyze-pr --repo owner/repo --pr 123 --github-token $GITHUB_TOKEN
 # Baseline-aware delta scan
 crossfire scan . --since-last-scan
 
-# View the adversarial debate after analysis
+# Stream live debate chat as each agent responds
 crossfire code-review . --debate
 
 # Full debug trace + markdown log
