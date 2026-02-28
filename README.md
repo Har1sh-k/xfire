@@ -76,6 +76,12 @@ crossfire code-review . --debate
 
 # Full debug trace + markdown log
 crossfire code-review . --debug
+
+# Play synthetic UI demo (no LLM calls — all 3 debate scenarios)
+crossfire demo --ui
+
+# Run one specific UI demo scenario
+crossfire demo --ui --scenario both_accept
 ```
 
 ---
@@ -165,7 +171,7 @@ make test       # run all tests
 make test-unit  # unit tests only
 make lint       # lint + type-check
 make format     # auto-fix formatting
-make demo       # run built-in demo
+make demo       # run synthetic UI demo (no LLM calls)
 ```
 
 For architecture details, pipeline diagrams, component inventory, and data models see [`docs/architecture.md`](docs/architecture.md).

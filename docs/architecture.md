@@ -218,7 +218,7 @@ crossfire scan . --base main --head feature
 
 | Component | File | Purpose (from code) | Status | Internal Dependencies |
 |-----------|------|---------------------|--------|-----------------------|
-| **CLI Entry Point** | `crossfire/cli.py` | Typer app with 12+ commands: `code-review`, `analyze-pr`, `analyze-diff`, `baseline`, `scan`, `report`, `init`, `config-check`, `demo`, `test-llm`, `auth login`, `auth status`, `debates`. `code-review` runs the whole-repo Code Review Pipeline. `baseline` builds `.crossfire/baseline/`. `scan` supports 6 input modes, auto-builds baseline, and prints delta summary. All pipeline commands accept `--debug` (live log + markdown file), `--silent` (suppress output), `--debate` (stream live debate chat as each agent responds), `--format`, `--output`. `test-llm` tests every configured agent with `AgentTestUI`. `debates` re-renders debate chat from saved JSON. | ✅ IMPLEMENTED | `config.settings`, `core.orchestrator`, `core.baseline`, `core.diff_resolver`, `agents.fast_model`, `core.models`, `core.severity`, `core.context_builder`, `output.*`, `integrations.github.comment_poster`, `cli_ui`, `auth.store` |
+| **CLI Entry Point** | `crossfire/cli.py` | Typer app with 12+ commands: `code-review`, `analyze-pr`, `analyze-diff`, `baseline`, `scan`, `report`, `init`, `config-check`, `demo`, `test-llm`, `auth login`, `auth status`, `debates`. `code-review` runs the whole-repo Code Review Pipeline. `baseline` builds `.crossfire/baseline/`. `scan` supports 6 input modes, auto-builds baseline, and prints delta summary. All pipeline commands accept `--debug` (live log + markdown file), `--silent` (suppress output), `--debate` (stream live debate chat as each agent responds), `--format`, `--output`. `test-llm` tests every configured agent with `AgentTestUI`. `debates` re-renders debate chat from saved JSON. `demo --ui` plays back three synthetic debate scenarios through the real `HackerUI` with no LLM calls (`tests/demo/scenarios.py`); `demo --fixture <name>` runs the real pipeline on a canned diff. | ✅ IMPLEMENTED | `config.settings`, `core.orchestrator`, `core.baseline`, `core.diff_resolver`, `agents.fast_model`, `core.models`, `core.severity`, `core.context_builder`, `output.*`, `integrations.github.comment_poster`, `cli_ui`, `auth.store` |
 | **Live UI** | `crossfire/cli_ui.py` | Terminal display layer. `HackerUI` — `rich.live.Live`-based display: braille phase spinner (`⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏`) at 10fps; rotating-circle agent icons (`◐◓◑◒`) at 6fps (visually distinct). `show_debate=True` streams live debate chat by intercepting `debate.argument`, `debate.judge_questions`, and `debate.verdict` structlog events above the Live area: `_print_debate_argument()` renders speech bubbles with severity badge `[HIGH]`/`[CRITICAL]` on the finding header; `_print_judge_questions()` renders a dim indented blockquote panel (not a speech bubble); `_print_debate_verdict()` renders a colored consensus panel. Optional `debug_mode` live-log ring buffer (last 8 events). structlog `processor()` raises `structlog.DropEvent()` to suppress stdout during pipeline. `AgentTestUI` — `transient=True` Live display for `test-llm`. Module-level `render_banner()` and `render_stats()`. | ✅ IMPLEMENTED | `rich.live`, `rich.text`, `rich.panel`, `rich.padding`, `structlog` |
 | **Debate Chat Renderer** | `crossfire/output/debate_view.py` | `render_debates(report, console)` renders all debates as a hacker-style terminal chat. Prosecution: left-aligned, red `rich.panel.Panel`. Defense: indented 6 spaces via `rich.padding.Padding`, cyan border. Judge: bright-white border, ⚖ icon. Consensus box: colored by outcome (confirmed=red, rejected=green, modified/inconclusive=yellow). Internal helpers (`_bubble()`, `_CONSENSUS_CONFIG`, `_SEVERITY_STYLE`, `_RESPONSE_INDENT`) are imported by `HackerUI` for live streaming. `render_debates()` itself is called only by `crossfire debates --input`. | ✅ IMPLEMENTED | `rich.console`, `rich.panel`, `rich.padding`, `rich.rule`, `rich.text` |
 | **Debug Log Writer** | `crossfire/output/debug_log.py` | `DebugCollector` — thread-safe structlog processor that buffers all pipeline log events in memory (time, level, event, extras). `write_debug_markdown(report, collector, command_info)` writes a timestamped markdown file (`crossfire-debug-YYYYMMDD-HHMMSS.md`) containing: pipeline events table, intent profile, context summary, full agent reviews with reasoning traces, debate transcripts, and the complete final report. Called by `--debug` flag on pipeline commands. | ✅ IMPLEMENTED | `threading`, `pathlib`, `output.markdown_report` |
@@ -955,23 +955,39 @@ cli.py:243 config_check(repo_dir: str)
 └─ Print agents, context_depth, debate config, severity_gate
 ```
 
-### COMMAND: `crossfire demo --fixture auth_bypass_regression`
+### COMMAND: `crossfire demo`
+
+Two modes — `--ui` (synthetic, no LLM calls) or `--fixture` (real pipeline):
 
 ```
-cli.py:261 demo(fixture: str, format: str, verbose: bool)
+cli.py demo(fixture, ui, scenario, format, verbose)
 │
-├─ fixtures_dir = Path(__file__).parent.parent / "tests/fixtures/prs" / fixture
-├─ diff_path = fixtures_dir / "diff.patch"
-├─ context_path = fixtures_dir / "context.json"
-├─ diff_text = diff_path.read_text()
-├─ parse_diff(diff_text) → files
-├─ json.loads(context_path.read_text()) → context_meta
-├─ PRContext(repo_name=..., pr_title=..., files=files)
-├─ load_settings()
-├─ CrossFireOrchestrator(settings)
-├─ orchestrator._run_pipeline(pr_context, skip_debate=False)
-└─ _output_report(report, format, None, False)
+├─ [--ui / --scenario]  ── UI demo mode (no LLM calls)
+│   ├─ from tests.demo.scenarios import SCENARIOS
+│   ├─ targets = [scenario] or all 3 keys
+│   └─ asyncio.run(_run_all())
+│       └─ for each scenario fn(console):
+│           ├─ HackerUI(show_debate=True)
+│           ├─ structlog.configure(processors=[ui.processor])
+│           └─ emit synthetic pipeline events with asyncio.sleep() delays
+│               (pipeline.context_building → debate.complete)
+│
+└─ [--fixture NAME]  ── Fixture-based mode (real pipeline)
+    ├─ fixtures_dir = tests/fixtures/prs/<name>/
+    ├─ diff_path.read_text(encoding="utf-8")
+    ├─ parse_diff(diff_text) → files
+    ├─ json.loads(context_path.read_text(encoding="utf-8")) → context_meta
+    ├─ PRContext(repo_name=..., pr_title=..., files=files)
+    ├─ load_settings()
+    ├─ CrossFireOrchestrator(settings)
+    ├─ orchestrator._run_pipeline(pr_context, skip_debate=False)
+    └─ _output_report(report, format, None, False)
 ```
+
+**UI demo scenarios** (`tests/demo/scenarios.py`):
+- `both_accept` — defence concedes round 1, CONFIRMED HIGH
+- `judge_questions` — full two-round debate with judge clarification panel, CONFIRMED MEDIUM
+- `defender_wins` — prosecution overruled by sandboxing evidence, REJECTED
 
 ---
 
