@@ -10,13 +10,21 @@ import threading
 import time
 from typing import Any
 
-# Braille spinner animation frames (rotates at ~8 fps via Live refresh rate)
+# Phase spinner — braille dots (rotates at ~10 fps via Live refresh rate)
 _SPINNER_FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+
+# Agent spinner — rotating circle quarters (visually distinct from phase spinner)
+_AGENT_SPINNER_FRAMES = "◐◓◑◒"
 
 
 def _spinner() -> str:
-    """Return the current braille spinner frame based on wall-clock time."""
-    return _SPINNER_FRAMES[int(time.monotonic() * 8) % len(_SPINNER_FRAMES)]
+    """Return the current braille phase spinner frame."""
+    return _SPINNER_FRAMES[int(time.monotonic() * 10) % len(_SPINNER_FRAMES)]
+
+
+def _agent_spinner() -> str:
+    """Return the current rotating-circle agent spinner frame."""
+    return _AGENT_SPINNER_FRAMES[int(time.monotonic() * 6) % len(_AGENT_SPINNER_FRAMES)]
 
 from rich.console import Console, ConsoleOptions, RenderResult
 from rich.live import Live
@@ -499,7 +507,7 @@ class HackerUI:
     @staticmethod
     def _agent_icon(status: str) -> tuple[str, str]:
         if status == "running":
-            return (_spinner(), "cyan")
+            return (_agent_spinner(), "cyan")
         icons = {
             "pending": ("●", "dim"),
             "done":    ("●", "green"),
