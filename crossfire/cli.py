@@ -11,15 +11,31 @@ from __future__ import annotations
 
 import json
 import shutil
+import sys
 import warnings
 from pathlib import Path
 from typing import NoReturn
 
 # Suppress asyncio ProactorEventLoop pipe-transport cleanup noise on Windows.
-# When Ctrl+C kills a subprocess, the __del__ on the transport tries to log a
-# ResourceWarning but the pipe is already closed → ValueError printed to stderr.
-# These are harmless GC artifacts, not real resource leaks.
+# When Ctrl+C kills a subprocess, __del__ on the transport calls _warn() but
+# the pipe is already closed, so repr() raises ValueError. Python prints this
+# via sys.unraisablehook (not the warnings module), so warnings.filterwarnings
+# alone is insufficient — we need to intercept at the unraisable level.
 warnings.filterwarnings("ignore", category=ResourceWarning, module="asyncio")
+
+_default_unraisablehook = sys.unraisablehook
+
+
+def _unraisable_filter(unraisable: sys.UnraisableHookArgs) -> None:
+    """Suppress asyncio pipe-transport GC noise on Windows Ctrl+C."""
+    if isinstance(unraisable.exc_value, ValueError) and (
+        "I/O operation on closed pipe" in str(unraisable.exc_value)
+    ):
+        return  # swallow silently — harmless GC artifact
+    _default_unraisablehook(unraisable)
+
+
+sys.unraisablehook = _unraisable_filter
 
 import typer
 from rich.console import Console
