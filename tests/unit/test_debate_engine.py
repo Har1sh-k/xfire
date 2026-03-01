@@ -24,7 +24,9 @@ from xfire.core.models import (
     ConsensusOutcome,
     DebateRecord,
     DebateTag,
+    DiffHunk,
     Evidence,
+    FileContext,
     Finding,
     FindingCategory,
     FindingStatus,
@@ -166,6 +168,73 @@ class TestFormatContextSummary:
         summary = _format_context_summary(context)
         assert "org/repo" in summary
         assert "Fix auth bypass" in summary
+
+    def test_includes_proposed_change_framing(self):
+        context = PRContext(
+            repo_name="org/repo",
+            pr_title="Add feature",
+            files=[],
+        )
+        summary = _format_context_summary(context)
+        assert "PROPOSED code change" in summary
+
+    def test_includes_diff_hunks(self):
+        hunk1 = DiffHunk(
+            file_path="auth/login.py",
+            old_start=10, old_count=3,
+            new_start=10, new_count=5,
+            content="@@ -10,3 +10,5 @@\n-old_line\n+new_line\n+another_line",
+        )
+        hunk2 = DiffHunk(
+            file_path="auth/login.py",
+            old_start=50, old_count=2,
+            new_start=52, new_count=3,
+            content="@@ -50,2 +52,3 @@\n context\n+added",
+        )
+        fc = FileContext(
+            path="auth/login.py",
+            diff_hunks=[hunk1, hunk2],
+        )
+        context = PRContext(
+            repo_name="org/repo",
+            pr_title="Fix auth",
+            files=[fc],
+        )
+        summary = _format_context_summary(context)
+        assert "### auth/login.py" in summary
+        assert "@@ -10,3 +10,5 @@" in summary
+        assert "@@ -50,2 +52,3 @@" in summary
+
+    def test_handles_files_without_diff_hunks(self):
+        """Files with no diff_hunks (e.g. new files) are skipped in diff output."""
+        fc_with = FileContext(
+            path="changed.py",
+            diff_hunks=[DiffHunk(
+                file_path="changed.py",
+                old_start=1, old_count=1, new_start=1, new_count=2,
+                content="@@ -1,1 +1,2 @@\n line\n+new",
+            )],
+        )
+        fc_without = FileContext(path="new_file.py", diff_hunks=[])
+        context = PRContext(
+            repo_name="org/repo",
+            pr_title="Mixed changes",
+            files=[fc_with, fc_without],
+        )
+        summary = _format_context_summary(context)
+        assert "### changed.py" in summary
+        assert "new_file.py" not in summary
+        assert "Files changed: 2" in summary
+
+    def test_empty_files_list(self):
+        context = PRContext(
+            repo_name="org/repo",
+            pr_title="Empty PR",
+            files=[],
+        )
+        summary = _format_context_summary(context)
+        assert "Files changed: 0" in summary
+        assert "PROPOSED code change" in summary
 
 
 # ─── Legacy Role Assignment Tests ────────────────────────────────────────────

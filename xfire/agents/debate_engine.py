@@ -95,12 +95,21 @@ def _format_intent_summary(intent: IntentProfile) -> str:
 
 
 def _format_context_summary(context: PRContext) -> str:
-    """Format PR context for debate prompts (abbreviated)."""
+    """Format PR context for debate prompts, including full diff content."""
     parts = [
         f"Repo: {context.repo_name}",
         f"PR: {context.pr_title}",
         f"Files changed: {len(context.files)}",
+        "",
+        "This review concerns a PROPOSED code change (PR/patch). The diff below shows what the change would introduce:",
+        "",
     ]
+    for fc in context.files:
+        if fc.diff_hunks:
+            parts.append(f"### {fc.path}")
+            for hunk in fc.diff_hunks:
+                parts.append(hunk.content)
+            parts.append("")
     return "\n".join(parts)
 
 
@@ -359,6 +368,7 @@ class DebateEngine:
                 defense_argument.argument,
                 None,
                 intent_summary,
+                context_summary=context_summary,
             )
             if judge_argument:
                 logger.info(
@@ -381,6 +391,7 @@ class DebateEngine:
                 prosecutor_argument.argument,
                 defense_argument.argument,
                 intent_summary,
+                context_summary=context_summary,
             )
 
             if judge_questions_text:
@@ -442,6 +453,7 @@ class DebateEngine:
                 round_2_prosecution.argument if round_2_prosecution else "",
                 round_2_defense.argument if round_2_defense else "",
                 intent_summary,
+                context_summary=context_summary,
             )
             if judge_argument:
                 logger.info(
@@ -662,6 +674,7 @@ class DebateEngine:
         prosecutor_argument: str,
         defense_argument: str,
         intent_summary: str,
+        context_summary: str = "",
     ) -> str | None:
         """Round 2: Judge identifies disagreement and asks clarifying questions."""
         if not agent:
@@ -669,6 +682,7 @@ class DebateEngine:
 
         prompt = build_judge_clarification_prompt(
             finding_summary, prosecutor_argument, defense_argument, intent_summary,
+            context_summary=context_summary,
         )
 
         try:
@@ -719,6 +733,7 @@ class DebateEngine:
         prosecution_response: str,
         defense_response: str,
         intent_summary: str,
+        context_summary: str = "",
     ) -> tuple[AgentArgument | None, str]:
         """Round 2: Judge makes final ruling after hearing both sides' responses."""
         if not agent:
@@ -730,7 +745,7 @@ class DebateEngine:
         prompt = build_judge_final_prompt(
             finding_summary, prosecutor_argument, defense_argument,
             judge_questions, prosecution_response, defense_response,
-            intent_summary,
+            intent_summary, context_summary=context_summary,
         )
 
         try:
@@ -749,6 +764,7 @@ class DebateEngine:
         defense_argument: str,
         rebuttal_argument: str | None,
         intent_summary: str,
+        context_summary: str = "",
     ) -> tuple[AgentArgument | None, str]:
         """Run the judge phase.
 
@@ -763,7 +779,7 @@ class DebateEngine:
 
         prompt = build_judge_prompt(
             finding_summary, prosecutor_argument, defense_argument,
-            rebuttal_argument, intent_summary,
+            rebuttal_argument, intent_summary, context_summary=context_summary,
         )
 
         try:
