@@ -7,8 +7,7 @@
 [![PyPI](https://img.shields.io/pypi/v/xfire)](https://pypi.org/project/xfire/)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
 [![License: GPL v3](https://img.shields.io/badge/license-GPLv3-blue)](https://github.com/Har1sh-k/xfire/blob/main/LICENSE)
-[![CI](https://img.shields.io/github/actions/workflow/status/Har1sh-k/xfire/crossfire.yml?branch=main&label=CI)](https://github.com/Har1sh-k/xfire/actions)
-[![Substack](https://img.shields.io/badge/substack-subscribe-orange?logo=substack)](https://substack.com/@har1shk)
+[![Substack](https://img.shields.io/badge/substack-subscribe-orange?logo=substack)](https://harishkolla.substack.com/)
 
 </div>
 

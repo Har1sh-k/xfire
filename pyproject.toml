@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "xfire"
-version = "0.1.0"
+version = "0.1.1"
 description = "Multiple agents. One verdict. Zero blind spots."
 readme = "README.md"
 license = "GPL-3.0-only"
