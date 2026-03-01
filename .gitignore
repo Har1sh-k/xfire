@@ -211,3 +211,14 @@ crossfire-debug-*.md
 results.md
 .crossfire/auth.json
 .crossfire/baseline/
+.crossfire/cache/
+
+# Secrets and certificates
+*.key
+*.pem
+*.p12
+*.pfx
+
+# OS metadata
+.DS_Store
+Thumbs.db
