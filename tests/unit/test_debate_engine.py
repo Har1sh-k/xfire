@@ -749,3 +749,146 @@ class TestApplyDebateResult:
         assert finding.status == FindingStatus.REJECTED
         assert finding.confidence == 0.2
         assert finding.consensus_outcome == "Rejected"
+
+
+# ─── repo_dir Threading Tests ───────────────────────────────────────────────
+
+
+class TestRepoDirThreading:
+    """Verify repo_dir flows from debate_all → _debate_single → agent creation."""
+
+    @pytest.mark.asyncio
+    async def test_debate_all_passes_repo_dir_to_debate_single(self):
+        """debate_all() forwards repo_dir to each _debate_single() call."""
+        settings = _make_settings(role_assignment="evidence")
+        engine = DebateEngine(settings)
+        finding = _make_finding(reviewing_agents=["claude"])
+
+        debate_record = DebateRecord(
+            finding_id="x",
+            prosecutor_argument=AgentArgument(
+                agent_name="claude", role="prosecutor",
+                position="real_issue", argument="yes", confidence=0.8,
+            ),
+            defense_argument=AgentArgument(
+                agent_name="codex", role="defense",
+                position="false_positive", argument="no", confidence=0.4,
+            ),
+            judge_ruling=AgentArgument(
+                agent_name="gemini", role="judge",
+                position="Confirmed", argument="agreed", confidence=0.8,
+            ),
+            rounds_used=1,
+            consensus=ConsensusOutcome.CONFIRMED,
+        )
+
+        with patch.object(engine, "_debate_single", new_callable=AsyncMock, return_value=debate_record) as mock_single:
+            await engine.debate_all(
+                findings=[finding],
+                context=PRContext(repo_name="test/repo", pr_title="Test"),
+                intent=IntentProfile(),
+                repo_dir="/tmp/target-repo",
+            )
+            mock_single.assert_called_once()
+            _, kwargs = mock_single.call_args
+            assert kwargs["repo_dir"] == "/tmp/target-repo"
+
+    @pytest.mark.asyncio
+    async def test_debate_all_passes_none_repo_dir_by_default(self):
+        """When repo_dir is omitted, _debate_single receives None."""
+        settings = _make_settings(role_assignment="evidence")
+        engine = DebateEngine(settings)
+        finding = _make_finding(reviewing_agents=["claude"])
+
+        debate_record = DebateRecord(
+            finding_id="x",
+            prosecutor_argument=AgentArgument(
+                agent_name="claude", role="prosecutor",
+                position="real_issue", argument="yes", confidence=0.8,
+            ),
+            defense_argument=AgentArgument(
+                agent_name="codex", role="defense",
+                position="false_positive", argument="no", confidence=0.4,
+            ),
+            judge_ruling=AgentArgument(
+                agent_name="gemini", role="judge",
+                position="Confirmed", argument="agreed", confidence=0.8,
+            ),
+            rounds_used=1,
+            consensus=ConsensusOutcome.CONFIRMED,
+        )
+
+        with patch.object(engine, "_debate_single", new_callable=AsyncMock, return_value=debate_record) as mock_single:
+            await engine.debate_all(
+                findings=[finding],
+                context=PRContext(repo_name="test/repo", pr_title="Test"),
+                intent=IntentProfile(),
+            )
+            _, kwargs = mock_single.call_args
+            assert kwargs["repo_dir"] is None
+
+    @pytest.mark.asyncio
+    async def test_debate_single_creates_agents_with_repo_dir(self):
+        """_debate_single() passes repo_dir to agent constructors."""
+        settings = _make_settings(role_assignment="evidence")
+        engine = DebateEngine(settings)
+        finding = _make_finding(reviewing_agents=["claude"])
+
+        mock_agent = AsyncMock()
+        mock_agent.name = "claude"
+        mock_agent.execute = AsyncMock(return_value='{"position":"real_issue","argument":"yes","confidence":0.8}')
+        mock_agent.parse_json_response = lambda r: {"position": "real_issue", "argument": "yes", "confidence": 0.8}
+
+        created_agents: list[tuple] = []
+
+        def capture_constructor(config, repo_dir=None):
+            created_agents.append(("claude", repo_dir))
+            return mock_agent
+
+        with patch.dict(
+            "xfire.agents.debate_engine.AGENT_CLASSES",
+            {"claude": capture_constructor, "codex": capture_constructor, "gemini": capture_constructor},
+        ):
+            await engine._debate_single(
+                finding=finding,
+                context=PRContext(repo_name="test/repo", pr_title="Test"),
+                intent=IntentProfile(),
+                repo_dir="/tmp/target-repo",
+            )
+
+        # All agents created should have received the repo_dir
+        assert len(created_agents) >= 2  # at least prosecutor + defense
+        for name, repo_dir in created_agents:
+            assert repo_dir == "/tmp/target-repo"
+
+    @pytest.mark.asyncio
+    async def test_debate_single_creates_agents_without_repo_dir(self):
+        """_debate_single() with repo_dir=None passes None to constructors."""
+        settings = _make_settings(role_assignment="evidence")
+        engine = DebateEngine(settings)
+        finding = _make_finding(reviewing_agents=["claude"])
+
+        mock_agent = AsyncMock()
+        mock_agent.name = "claude"
+        mock_agent.execute = AsyncMock(return_value='{"position":"real_issue","argument":"yes","confidence":0.8}')
+        mock_agent.parse_json_response = lambda r: {"position": "real_issue", "argument": "yes", "confidence": 0.8}
+
+        created_agents: list[tuple] = []
+
+        def capture_constructor(config, repo_dir=None):
+            created_agents.append(("agent", repo_dir))
+            return mock_agent
+
+        with patch.dict(
+            "xfire.agents.debate_engine.AGENT_CLASSES",
+            {"claude": capture_constructor, "codex": capture_constructor, "gemini": capture_constructor},
+        ):
+            await engine._debate_single(
+                finding=finding,
+                context=PRContext(repo_name="test/repo", pr_title="Test"),
+                intent=IntentProfile(),
+                repo_dir=None,
+            )
+
+        for name, repo_dir in created_agents:
+            assert repo_dir is None
