@@ -1,4 +1,4 @@
-"""Debug markdown log writer for CrossFire.
+"""Debug markdown log writer for xfire.
 
 Writes a full trace of context, intent, agent interactions, debates,
 and findings to a timestamped markdown file.
@@ -78,7 +78,7 @@ def write_debug_markdown(
     lines: list[str] = []
     w = lines.append  # shorthand
 
-    w("# CrossFire Debug Log")
+    w("# xfire Debug Log")
     w("")
     w(f"**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}  ")
     if report.review_duration_seconds:

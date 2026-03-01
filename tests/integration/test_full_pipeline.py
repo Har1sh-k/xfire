@@ -1,4 +1,4 @@
-"""Integration tests for the full CrossFire pipeline.
+"""Integration tests for the full xfire pipeline.
 
 These tests exercise context building and intent inference on fixtures
 without calling actual LLM agents (which require API keys).
@@ -84,7 +84,7 @@ class TestReportGeneration:
     def test_markdown_report(self):
         report = self._build_mock_report()
         md = generate_markdown_report(report)
-        assert "CrossFire Security Review" in md
+        assert "xfire Security Review" in md
         assert "Test finding" in md
 
     def test_json_report(self):

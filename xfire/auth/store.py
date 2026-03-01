@@ -1,4 +1,4 @@
-"""Local auth store and CLI credential readers for CrossFire agent authentication.
+"""Local auth store and CLI credential readers for xfire agent authentication.
 
 Priority chain for each agent:
   - Claude : ANTHROPIC_API_KEY env var → setup-token in auth store
@@ -247,7 +247,7 @@ def get_codex_api_key(
     """Return a usable OpenAI API key.
 
     Sources tried in order:
-    1. ``api_key`` stored in the CrossFire auth store (legacy / manual).
+    1. ``api_key`` stored in the xfire auth store (legacy / manual).
     2. ``OPENAI_API_KEY`` from the Codex CLI credential file (~/.codex/auth.json).
     """
     store = load_auth_store(auth_path)
@@ -307,7 +307,7 @@ def get_gemini_access_token(
     """Return a valid Gemini OAuth access token.
 
     Sources tried in order:
-    1. CrossFire auth store OAuth credential (manually stored).
+    1. xfire auth store OAuth credential (manually stored).
     2. Gemini CLI credential file (~/.gemini/oauth_creds.json).
 
     Note: token refresh is not attempted here — if the stored token is

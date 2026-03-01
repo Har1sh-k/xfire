@@ -1,3 +1,3 @@
-"""CrossFire — Multiple agents. One verdict. Zero blind spots."""
+"""xfire — Multiple agents. One verdict. Zero blind spots."""
 
-__version__ = "0.1.0"
+__version__ = "0.1.2"

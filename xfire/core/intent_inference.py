@@ -1,4 +1,4 @@
-"""Purpose and intent inference for CrossFire.
+"""Purpose and intent inference for xfire.
 
 Heuristic-first with optional LLM enrichment:
 

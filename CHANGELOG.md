@@ -1,9 +1,31 @@
 # Changelog
 
-All notable changes to CrossFire will be documented in this file.
+All notable changes to xfire will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [0.1.2] - 2026-02-28
+
+### Added
+
+- OpenClaw skill file (`.openclaw/skill.md`) for ClawHub marketplace distribution
+
+### Changed
+
+- Renamed all "CrossFire" references to "xfire" across docs, CLI help strings, report output, SARIF tool name, and test assertions
+- Renamed GitHub Actions workflow file and job from `crossfire` to `xfire`
+- Added missing env vars (`XFIRE_CACHE_DIR`, `XFIRE_AUTH_PATH`) to `.env.example`
+- Fixed line length in CONTRIBUTING.md (100 → 120 to match pyproject.toml)
+- GitHub comment poster now finds both old "CrossFire" and new "xfire" comments for update-in-place
+
+## [0.1.1] - 2026-02-28
+
+### Fixed
+
+- Bumped version to 0.1.1
+- Fixed Substack URL in pyproject.toml
+- Removed broken CI badge from README
 
 ## [0.1.0] - 2026-02-28
 
@@ -40,4 +62,6 @@ Initial public release.
 - Auth tokens isolated in `.xfire/auth.json` (gitignored)
 - Structural prompt injection guards in `xfire/agents/prompts/guardrails.py`
 
+[0.1.2]: https://github.com/Har1sh-k/xfire/releases/tag/v0.1.2
+[0.1.1]: https://github.com/Har1sh-k/xfire/releases/tag/v0.1.1
 [0.1.0]: https://github.com/Har1sh-k/xfire/releases/tag/v0.1.0

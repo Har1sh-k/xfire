@@ -1,4 +1,4 @@
-"""Shared test fixtures and factories for CrossFire tests."""
+"""Shared test fixtures and factories for xfire tests."""
 
 import pathlib
 

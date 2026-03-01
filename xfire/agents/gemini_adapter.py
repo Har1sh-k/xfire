@@ -84,7 +84,7 @@ class GeminiAgent(BaseAgent):
 
         Auth priority:
           1. GOOGLE_API_KEY env var (key-based)
-          2. OAuth access token (~/.gemini/oauth_creds.json or CrossFire auth store)
+          2. OAuth access token (~/.gemini/oauth_creds.json or xfire auth store)
 
         The agent loops calling read_file / search_files / list_directory until
         it produces its final response (max MAX_TOOL_ITERATIONS).
@@ -107,7 +107,7 @@ class GeminiAgent(BaseAgent):
                             self.name,
                             "Gemini OAuth token expired. Re-run the Gemini CLI to refresh:\n"
                             "  gemini\n"
-                            "Then retry CrossFire.",
+                            "Then retry xfire.",
                         )
                 raise AgentError(
                     self.name,

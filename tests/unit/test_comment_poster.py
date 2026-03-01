@@ -8,7 +8,7 @@ from xfire.integrations.github.comment_poster import post_review_comment
 class TestPostReviewComment:
     @pytest.mark.asyncio
     async def test_new_comment(self, respx_mock):
-        """Posts a new comment when no existing CrossFire comment found."""
+        """Posts a new comment when no existing xfire comment found."""
         import httpx
 
         # No existing comments
@@ -25,10 +25,10 @@ class TestPostReviewComment:
 
     @pytest.mark.asyncio
     async def test_update_existing(self, respx_mock):
-        """Updates an existing CrossFire comment."""
+        """Updates an existing xfire comment."""
         import httpx
 
-        # Existing CrossFire comment
+        # Existing xfire comment (backward-compatible with old "CrossFire" name)
         respx_mock.get("https://api.github.com/repos/test/repo/issues/1/comments").mock(
             return_value=httpx.Response(200, json=[
                 {"id": 99, "body": "# CrossFire Security Review\nOld results"},

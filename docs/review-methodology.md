@@ -1,8 +1,8 @@
 # Review Methodology
 
-## How CrossFire Reviews Code
+## How xfire Reviews Code
 
-CrossFire's agents review code like senior security engineers — by reading and reasoning, not pattern matching.
+xfire's agents review code like senior security engineers — by reading and reasoning, not pattern matching.
 
 ### 1. Understand Context
 - What does the repository do?
@@ -36,9 +36,9 @@ CrossFire's agents review code like senior security engineers — by reading and
 
 ## Purpose-Aware Thinking
 
-The key differentiator: CrossFire asks "Is this INTENDED?" before flagging.
+The key differentiator: xfire asks "Is this INTENDED?" before flagging.
 
-A subprocess.run() in a coding agent's sandbox executor is different from a subprocess.run() in a web API endpoint. CrossFire understands this.
+A subprocess.run() in a coding agent's sandbox executor is different from a subprocess.run() in a web API endpoint. xfire understands this.
 
 ### Decision Framework
 

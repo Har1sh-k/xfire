@@ -115,7 +115,7 @@ Full config reference: [`docs/architecture.md`](https://github.com/Har1sh-k/xfir
 ### Stateless PR Review
 
 ```yaml
-- name: CrossFire Security Review
+- name: xfire security review
   env:
     ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
   run: |
@@ -135,13 +135,13 @@ Full config reference: [`docs/architecture.md`](https://github.com/Har1sh-k/xfir
 ### Baseline-Aware Scan (recommended for main)
 
 ```yaml
-- name: Restore CrossFire baseline
+- name: Restore xfire baseline
   uses: actions/cache@v4
   with:
     path: .xfire/baseline/
     key: xfire-baseline-${{ github.ref_name }}
 
-- name: CrossFire Baseline Scan
+- name: xfire baseline scan
   env:
     ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
   run: |
@@ -153,7 +153,7 @@ Full config reference: [`docs/architecture.md`](https://github.com/Har1sh-k/xfir
   with:
     sarif_file: xfire.sarif
 
-- name: Save CrossFire baseline
+- name: Save xfire baseline
   uses: actions/cache/save@v4
   with:
     path: .xfire/baseline/

@@ -1,4 +1,4 @@
-"""Fancy hacker-style chat renderer for CrossFire adversarial debate transcripts.
+"""Fancy hacker-style chat renderer for xfire adversarial debate transcripts.
 
 Each debate is rendered as a styled terminal chat:
   - Prosecution:  red border,  left-aligned

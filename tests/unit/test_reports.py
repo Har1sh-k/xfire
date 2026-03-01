@@ -64,7 +64,7 @@ class TestMarkdownReport:
         report = _make_report()
         md = generate_markdown_report(report)
         assert "No Security Issues Found" in md
-        assert "CrossFire Security Review" in md
+        assert "xfire Security Review" in md
 
     def test_confirmed_finding(self):
         report = _make_report(findings=[_make_finding()])
@@ -129,7 +129,7 @@ class TestSarifReport:
         sarif = json.loads(output)
         assert sarif["version"] == "2.1.0"
         assert len(sarif["runs"]) == 1
-        assert sarif["runs"][0]["tool"]["driver"]["name"] == "CrossFire"
+        assert sarif["runs"][0]["tool"]["driver"]["name"] == "xfire"
 
     def test_results_present(self):
         report = _make_report(findings=[_make_finding()])

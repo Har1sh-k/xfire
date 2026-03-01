@@ -1,4 +1,4 @@
-"""Deep context extraction engine for CrossFire.
+"""Deep context extraction engine for xfire.
 
 Builds complete PRContext from GitHub PRs or local diffs, including:
 - Diff parsing with hunk extraction

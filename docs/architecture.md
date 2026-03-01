@@ -1,4 +1,4 @@
-# CrossFire Architecture
+# xfire Architecture
 
 > Generated from source code analysis. Reflects what the code **actually does**.
 >
@@ -8,7 +8,7 @@
 
 ## Pipeline Overview
 
-CrossFire has three pipelines.
+xfire has three pipelines.
 
 | Pipeline | Command | Context Source |
 |----------|---------|---------------|
@@ -1379,7 +1379,7 @@ Loading:
 | `/repos/{repo}` | GET | `pr_loader.py` | Repo description |
 | `/repos/{repo}/pulls/{pr}/commits` | GET | `pr_loader.py` | Commit messages |
 | `/repos/{repo}/contents/{manifest}?ref={head}` | GET (Accept: raw) | `pr_loader.py` | Manifest files for intent inference (requirements.txt, package.json, etc.) |
-| `/repos/{repo}/issues/{pr}/comments?per_page=100&page=N` | GET | `comment_poster.py` | Check for existing CrossFire comment (paginated) |
+| `/repos/{repo}/issues/{pr}/comments?per_page=100&page=N` | GET | `comment_poster.py` | Check for existing xfire comment (paginated) |
 | `/repos/{repo}/issues/comments/{id}` | PATCH | `comment_poster.py` | Update existing comment |
 | `/repos/{repo}/issues/{pr}/comments` | POST | `comment_poster.py` | Create new comment |
 
@@ -1488,7 +1488,7 @@ All pipeline commands now show a live phase-by-phase status display using `rich.
 - Disappears after completion; results rendered as a hacker-styled cyan table
 
 **Module-level functions**:
-- `render_banner()` — ASCII CrossFire logo + tagline
+- `render_banner()` — ASCII xfire logo + tagline
 - `render_stats(repo, mode, agents, ...)` — metadata header (repo, mode, enabled agents, context depth, debate flag)
 
 **structlog configuration pattern**:

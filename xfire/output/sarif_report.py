@@ -1,4 +1,4 @@
-"""SARIF v2.1.0 report generator for CrossFire."""
+"""SARIF v2.1.0 report generator for xfire."""
 
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ SARIF_RANK_MAP = {
 
 
 def generate_sarif_report(report: CrossFireReport) -> str:
-    """Generate a SARIF v2.1.0 report from a CrossFire analysis report."""
+    """Generate a SARIF v2.1.0 report from an xfire analysis report."""
     sarif: dict[str, Any] = {
         "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json",
         "version": "2.1.0",
@@ -34,9 +34,9 @@ def generate_sarif_report(report: CrossFireReport) -> str:
             {
                 "tool": {
                     "driver": {
-                        "name": "CrossFire",
-                        "version": "0.1.0",
-                        "informationUri": "https://github.com/xfire",
+                        "name": "xfire",
+                        "version": "0.1.2",
+                        "informationUri": "https://github.com/Har1sh-k/xfire",
                         "rules": _build_rules(report.findings),
                     }
                 },
@@ -82,7 +82,7 @@ def _build_rules(findings: list[Finding]) -> list[dict[str, Any]]:
                 "level": SARIF_LEVEL_MAP.get(finding.severity, "warning"),
             },
             "help": {
-                "text": f"CrossFire rule for {readable_name} findings.",
+                "text": f"xfire rule for {readable_name} findings.",
             },
         }
         rules.append(rule)

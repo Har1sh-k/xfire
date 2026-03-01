@@ -1,4 +1,4 @@
-"""Base skill interface for CrossFire."""
+"""Base skill interface for xfire."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ class SkillResult(BaseModel):
 
 
 class BaseSkill(ABC):
-    """Abstract base class for all CrossFire skills.
+    """Abstract base class for all xfire skills.
 
     Skills are capabilities that provide deeper code understanding.
     They are pre-computed by the orchestrator and included in agent

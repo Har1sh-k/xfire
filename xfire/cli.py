@@ -1,4 +1,4 @@
-"""CrossFire CLI — AI-powered PR security review.
+"""xfire CLI — AI-powered PR security review.
 
 Usage:
     xfire analyze-pr --repo owner/repo --pr 123
@@ -218,9 +218,9 @@ def auth_login(
 
     \b
     Claude  — paste an Anthropic setup-token (or set ANTHROPIC_API_KEY).
-    Codex   — CrossFire reads ~/.codex/auth.json automatically after you
+    Codex   — xfire reads ~/.codex/auth.json automatically after you
                log in via the Codex CLI.  Set OPENAI_API_KEY for API mode.
-    Gemini  — CrossFire reads ~/.gemini/oauth_creds.json automatically after
+    Gemini  — xfire reads ~/.gemini/oauth_creds.json automatically after
                you log in via the Gemini CLI.  Set GOOGLE_API_KEY for API mode.
     """
     provider_norm = provider.strip().lower()
@@ -235,7 +235,7 @@ def auth_login(
         cli_cred = read_claude_cli_credentials()
         if cli_cred:
             console.print("[green]✓ Claude CLI credentials found in ~/.claude/.credentials.json[/green]")
-            console.print("[dim]CrossFire will use the OAuth token automatically when mode=api.[/dim]")
+            console.print("[dim]xfire will use the OAuth token automatically when mode=api.[/dim]")
             if not token:
                 console.print("")
                 console.print("[dim]Optionally also save an Anthropic setup-token for fallback:[/dim]")
@@ -265,7 +265,7 @@ def auth_login(
         oauth = read_codex_oauth_token()
         if key:
             console.print("[green]✓ OpenAI API key found in ~/.codex/auth.json[/green]")
-            console.print("[dim]CrossFire will use this automatically when mode=api.[/dim]")
+            console.print("[dim]xfire will use this automatically when mode=api.[/dim]")
         elif oauth:
             console.print("[yellow]Codex CLI OAuth token found in ~/.codex/auth.json[/yellow]")
             console.print("[yellow]but it cannot be used directly with the OpenAI API.[/yellow]")
@@ -273,7 +273,7 @@ def auth_login(
             console.print("For API mode you need a real OpenAI API key:")
             console.print("  Set the [bold]OPENAI_API_KEY[/bold] environment variable (starts with sk-).")
             console.print("")
-            console.print("[dim]CLI mode works fine — CrossFire will run the Codex CLI directly.[/dim]")
+            console.print("[dim]CLI mode works fine — xfire will run the Codex CLI directly.[/dim]")
         else:
             console.print("[yellow]Codex credentials not found.[/yellow]")
             console.print("")
@@ -281,7 +281,7 @@ def auth_login(
             console.print("  1. Set the [bold]OPENAI_API_KEY[/bold] environment variable.")
             console.print("  2. Log in via the Codex CLI:")
             console.print("       [bold]codex[/bold]   (runs the interactive Codex login)")
-            console.print("     CrossFire will read ~/.codex/auth.json automatically.")
+            console.print("     xfire will read ~/.codex/auth.json automatically.")
 
     else:  # gemini
         import time as _time
@@ -304,12 +304,12 @@ def auth_login(
                 console.print("")
                 console.print("Refresh your Gemini token:")
                 console.print("  Run [bold]gemini[/bold] in your terminal to log in again.")
-                console.print("  CrossFire will pick up the new token automatically.")
+                console.print("  xfire will pick up the new token automatically.")
             else:
                 console.print("[green]✓ Gemini credentials found in ~/.gemini/oauth_creds.json[/green]")
                 if expires_str:
                     console.print(f"[dim]Token expires: {expires_str}[/dim]")
-                console.print("[dim]CrossFire will use these automatically when mode=api.[/dim]")
+                console.print("[dim]xfire will use these automatically when mode=api.[/dim]")
         else:
             console.print("[yellow]Gemini credentials not found.[/yellow]")
             console.print("")
@@ -317,7 +317,7 @@ def auth_login(
             console.print("  1. Set the [bold]GOOGLE_API_KEY[/bold] environment variable.")
             console.print("  2. Log in via the Gemini CLI:")
             console.print("       [bold]gemini[/bold]   (runs the interactive Gemini login)")
-            console.print("     CrossFire will read ~/.gemini/oauth_creds.json automatically.")
+            console.print("     xfire will read ~/.gemini/oauth_creds.json automatically.")
 
 
 @auth_app.command("status")
@@ -328,7 +328,7 @@ def auth_status() -> None:
     auth_path = resolve_auth_path()
     rows = auth_status_rows(auth_path)
 
-    table = Table(title="CrossFire Auth Status", border_style="dim")
+    table = Table(title="xfire Auth Status", border_style="dim")
     table.add_column("Provider", style="bold")
     table.add_column("Source")
     table.add_column("Status")
@@ -1063,7 +1063,7 @@ def scan(
 
 @app.command()
 def report(
-    input: str = typer.Option(..., help="Path to a CrossFire JSON results file"),
+    input: str = typer.Option(..., help="Path to an xfire JSON results file"),
     format: str = typer.Option("markdown", help="Output format: markdown|json|sarif"),
     output: str | None = typer.Option(None, help="Output file path"),
 ) -> None:
@@ -1089,7 +1089,7 @@ def report(
 
 @app.command()
 def debates(
-    input: str = typer.Option(..., help="Path to a CrossFire JSON results file"),
+    input: str = typer.Option(..., help="Path to an xfire JSON results file"),
 ) -> None:
     """Replay adversarial debate transcripts from a saved results file.
 
@@ -1117,7 +1117,7 @@ def debates(
 
 @app.command()
 def init() -> None:
-    """Initialize CrossFire configuration in the current repository."""
+    """Initialize xfire configuration in the current repository."""
     config_dir = Path.cwd() / ".xfire"
     config_dir.mkdir(exist_ok=True)
 
@@ -1140,7 +1140,7 @@ def init() -> None:
 def config_check(
     repo_dir: str = typer.Option(".", help="Path to the repository root"),
 ) -> None:
-    """Validate the CrossFire configuration."""
+    """Validate the xfire configuration."""
     from xfire.config.settings import ConfigError, load_settings
 
     try:
@@ -1525,7 +1525,7 @@ def _output_report(
 def _default_config_yaml() -> str:
     """Return default config YAML content."""
     return """\
-# CrossFire Configuration
+# xfire Configuration
 
 repo:
   purpose: ""

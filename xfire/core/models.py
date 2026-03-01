@@ -1,4 +1,4 @@
-"""Core data models for CrossFire.
+"""Core data models for xfire.
 
 All Pydantic v2 BaseModel types used throughout the pipeline.
 """
@@ -365,7 +365,7 @@ class DebateRecord(BaseModel):
 
 
 class CrossFireReport(BaseModel):
-    """Complete CrossFire analysis report."""
+    """Complete xfire analysis report."""
 
     repo_name: str
     pr_number: int | None = None

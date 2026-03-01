@@ -96,7 +96,7 @@ Agent adapters live in `xfire/agents/`. Each adapter:
 ## Code style
 
 - Python 3.11+
-- Line length: 100 (ruff)
+- Line length: 120 (ruff)
 - Type annotations on all public functions
 - `structlog` for logging — never `print()`
 - Pydantic v2 for all data models

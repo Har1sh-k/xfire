@@ -25,7 +25,7 @@ async def post_review_comment(
     }
 
     async with httpx.AsyncClient(headers=headers, timeout=30.0) as client:
-        # Check for existing CrossFire comments to update instead of creating new
+        # Check for existing xfire comments to update instead of creating new
         existing_comment_id = None
         page = 1
         while True:
@@ -39,7 +39,8 @@ async def post_review_comment(
             if not comments:
                 break
             for comment in comments:
-                if "CrossFire Security Review" in comment.get("body", ""):
+                body = comment.get("body", "")
+                if "xfire Security Review" in body or "CrossFire Security Review" in body:
                     existing_comment_id = comment["id"]
                     break
             if existing_comment_id or len(comments) < 100:

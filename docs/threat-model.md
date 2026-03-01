@@ -1,8 +1,8 @@
 # Threat Model
 
-## What CrossFire Detects
+## What xfire Detects
 
-CrossFire is designed to catch security issues and dangerous bugs that traditional SAST tools miss:
+xfire is designed to catch security issues and dangerous bugs that traditional SAST tools miss:
 
 ### Security Issues
 - Injection vulnerabilities with actual data flow traces
@@ -19,7 +19,7 @@ CrossFire is designed to catch security issues and dangerous bugs that tradition
 - Broken error recovery
 - Partial state updates
 
-## What CrossFire Does NOT Do
+## What xfire Does NOT Do
 
 - It does not run code or exploit vulnerabilities
 - It does not provide exploit code or attack instructions
@@ -29,7 +29,7 @@ CrossFire is designed to catch security issues and dangerous bugs that tradition
 
 ## Prompt Injection Risks
 
-Since CrossFire includes PR descriptions, commit messages, and code in agent prompts, there is a risk of prompt injection:
+Since xfire includes PR descriptions, commit messages, and code in agent prompts, there is a risk of prompt injection:
 
 ### Mitigations
 - PR descriptions are included as data, not instructions
@@ -42,6 +42,6 @@ Since CrossFire includes PR descriptions, commit messages, and code in agent pro
 
 ## Trust Model
 
-- **Trusted**: CrossFire configuration, prompt templates, skill implementations
+- **Trusted**: xfire configuration, prompt templates, skill implementations
 - **Semi-trusted**: Repository code (may contain intentional dangerous capabilities)
 - **Untrusted**: PR descriptions, commit messages, code comments, external input

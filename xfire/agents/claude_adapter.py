@@ -34,7 +34,7 @@ class ClaudeAgent(BaseAgent):
 
         Flags mirror OpenClaw's DEFAULT_CLAUDE_BACKEND:
           claude -p --output-format json --dangerously-skip-permissions
-        with --append-system-prompt and --add-dir added for CrossFire.
+        with --append-system-prompt and --add-dir added for xfire.
         """
         cmd = [self.config.cli_command]
         # -p without a value = non-interactive mode, reads prompt from stdin
@@ -89,7 +89,7 @@ class ClaudeAgent(BaseAgent):
 
         Auth priority:
           1. ANTHROPIC_API_KEY env var
-          2. Claude setup-token in CrossFire auth store
+          2. Claude setup-token in xfire auth store
           3. Claude Code CLI OAuth token (~/.claude/.credentials.json)
 
         The agent loops calling read_file / search_files / list_directory until

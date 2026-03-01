@@ -1,4 +1,4 @@
-"""Markdown report generator for CrossFire."""
+"""Markdown report generator for xfire."""
 
 from __future__ import annotations
 
@@ -11,12 +11,12 @@ from xfire.core.models import (
 
 
 def generate_markdown_report(report: CrossFireReport) -> str:
-    """Generate a markdown report from a CrossFire analysis report."""
+    """Generate a markdown report from an xfire analysis report."""
     parts: list[str] = []
 
     # Header
     pr_ref = f" #{report.pr_number}" if report.pr_number else ""
-    parts.append(f"# 🔥 CrossFire Security Review — {report.repo_name}{pr_ref}")
+    parts.append(f"# 🔥 xfire Security Review — {report.repo_name}{pr_ref}")
     parts.append("")
     parts.append("> Multiple agents. One verdict. Zero blind spots.")
     parts.append("")

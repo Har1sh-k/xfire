@@ -1,4 +1,4 @@
-"""Default configuration values for CrossFire."""
+"""Default configuration values for xfire."""
 
 DEFAULT_CONFIG: dict = {
     "repo": {

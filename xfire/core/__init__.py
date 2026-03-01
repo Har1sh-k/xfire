@@ -1,4 +1,4 @@
-"""Core pipeline components for CrossFire."""
+"""Core pipeline components for xfire."""
 
 from xfire.core.models import (
     AgentReview,

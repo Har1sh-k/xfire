@@ -1,4 +1,4 @@
-"""Main pipeline orchestrator for CrossFire.
+"""Main pipeline orchestrator for xfire.
 
 Ties together context building, intent inference, skills, agent reviews,
 finding synthesis, adversarial debate, policy enforcement, and reporting
@@ -39,7 +39,7 @@ logger = structlog.get_logger()
 
 
 class CrossFireOrchestrator:
-    """Orchestrates the full CrossFire analysis pipeline."""
+    """Orchestrates the full xfire analysis pipeline."""
 
     def __init__(
         self, settings: CrossFireSettings, cache_dir: str | None = None,

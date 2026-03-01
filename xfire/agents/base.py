@@ -1,4 +1,4 @@
-"""Abstract base agent interface for CrossFire."""
+"""Abstract base agent interface for xfire."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ class AgentError(Exception):
 
 
 class BaseAgent(ABC):
-    """Abstract base class for all CrossFire agent adapters.
+    """Abstract base class for all xfire agent adapters.
 
     Each agent supports both CLI and API execution modes.
     """

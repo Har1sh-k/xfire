@@ -1,4 +1,4 @@
-"""Report output generators for CrossFire."""
+"""Report output generators for xfire."""
 
 from xfire.output.json_report import generate_json_report
 from xfire.output.markdown_report import generate_markdown_report

@@ -2,7 +2,7 @@
 
 ## Finding Model
 
-Every CrossFire finding includes:
+Every xfire finding includes:
 
 | Field | Type | Description |
 |-------|------|-------------|

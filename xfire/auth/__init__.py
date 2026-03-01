@@ -1,4 +1,4 @@
-"""Auth helpers for CrossFire — CLI credential readers and auth store."""
+"""Auth helpers for xfire — CLI credential readers and auth store."""
 
 from xfire.auth.store import (
     AuthStore,

@@ -1,4 +1,4 @@
-"""Hacker-themed live terminal UI for CrossFire pipeline execution.
+"""Hacker-themed live terminal UI for xfire pipeline execution.
 
 Inspired by Metasploit's banner style:  cyan accents, ASCII art header,
 stats block, and per-phase spinners that resolve to checkmarks.
@@ -31,7 +31,7 @@ from rich.live import Live
 from rich.text import Text
 
 # ---------------------------------------------------------------------------
-# ASCII banner — CrossFire logo (block-style, 6 lines)
+# ASCII banner — xfire logo (block-style, 6 lines)
 # ---------------------------------------------------------------------------
 
 _LOGO_LINES = [
@@ -49,7 +49,7 @@ _LOGO_LINES = [
 
 
 def render_banner() -> Text:
-    """Return the static CrossFire ASCII logo as a Rich Text object."""
+    """Return the static xfire ASCII logo as a Rich Text object."""
     t = Text()
     t.append("\n")
     for line in _LOGO_LINES:

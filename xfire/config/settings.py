@@ -1,4 +1,4 @@
-"""Configuration loading for CrossFire.
+"""Configuration loading for xfire.
 
 Priority: CLI flags > environment variables > .xfire/config.yaml > defaults.
 """
@@ -103,7 +103,7 @@ class FastModelConfig(BaseModel):
 
 
 class CrossFireSettings(BaseModel):
-    """Root configuration model for CrossFire."""
+    """Root configuration model for xfire."""
 
     repo: RepoConfig = Field(default_factory=RepoConfig)
     analysis: AnalysisConfig = Field(default_factory=AnalysisConfig)
@@ -143,7 +143,7 @@ def _find_config_file(repo_dir: str | None = None) -> Path | None:
 
 
 class ConfigError(Exception):
-    """Error loading or validating CrossFire configuration."""
+    """Error loading or validating xfire configuration."""
 
 
 def _load_yaml_config(path: Path) -> dict:

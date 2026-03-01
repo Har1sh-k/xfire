@@ -1,10 +1,10 @@
-name: CrossFire Security Review
+name: xfire Security Review
 on:
   pull_request:
     types: [opened, synchronize]
 
 jobs:
-  crossfire:
+  xfire:
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -17,7 +17,7 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Restore CrossFire cache
+      - name: Restore xfire cache
         uses: actions/cache@v4
         with:
           path: .xfire/cache

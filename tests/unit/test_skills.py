@@ -1,4 +1,4 @@
-"""Tests for CrossFire skills."""
+"""Tests for xfire skills."""
 
 import subprocess
 

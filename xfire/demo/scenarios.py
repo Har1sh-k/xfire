@@ -1,5 +1,5 @@
 """
-UI/UX demo scenarios for CrossFire — runs the real HackerUI with synthetic events.
+UI/UX demo scenarios for xfire — runs the real HackerUI with synthetic events.
 
 No LLM calls are made. Every structlog event is emitted manually with realistic
 delays to mimic actual pipeline timing. Use this to validate visual changes to
