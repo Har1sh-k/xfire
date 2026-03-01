@@ -1,18 +1,15 @@
 """Tests for CrossFire skills."""
 
-import os
 import subprocess
-import tempfile
-from pathlib import Path
 
-from xfire.skills.code_navigation import CodeNavigationSkill, ImportRef
+from xfire.skills.code_navigation import CodeNavigationSkill
 from xfire.skills.config_analysis import ConfigAnalysisSkill
 from xfire.skills.data_flow_tracing import DataFlowTracingSkill
 from xfire.skills.dependency_analysis import (
     DependencyAnalysisSkill,
+    _parse_package_json_deps,
     _parse_pyproject_deps,
     _parse_requirements_txt,
-    _parse_package_json_deps,
 )
 from xfire.skills.git_archeology import GitArcheologySkill
 from xfire.skills.test_coverage_check import TestCoverageCheckSkill

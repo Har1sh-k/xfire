@@ -3,7 +3,6 @@
 import json
 
 from xfire.core.models import (
-    AgentReview,
     CrossFireReport,
     Evidence,
     Finding,

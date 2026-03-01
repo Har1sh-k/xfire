@@ -11,7 +11,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-
 # ---------------------------------------------------------------------------
 # Event collector — hooked into structlog as a processor
 # ---------------------------------------------------------------------------
@@ -79,30 +78,30 @@ def write_debug_markdown(
     lines: list[str] = []
     w = lines.append  # shorthand
 
-    w(f"# CrossFire Debug Log")
-    w(f"")
+    w("# CrossFire Debug Log")
+    w("")
     w(f"**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}  ")
     if report.review_duration_seconds:
         w(f"**Duration:** {report.review_duration_seconds:.1f}s  ")
     w(f"**Repo:** {report.repo_name}  ")
     if command_info:
-        w(f"**Command flags:**")
+        w("**Command flags:**")
         for k, v in command_info.items():
             if v is not None and v is not False:
                 w(f"  - `{k}`: `{v}`")
-    w(f"")
-    w(f"---")
-    w(f"")
+    w("")
+    w("---")
+    w("")
 
     # ------------------------------------------------------------------
     # Pipeline Events
     # ------------------------------------------------------------------
     events = collector.events
     if events:
-        w(f"## Pipeline Events")
-        w(f"")
-        w(f"| Time | Level | Event | Details |")
-        w(f"|------|-------|-------|---------|")
+        w("## Pipeline Events")
+        w("")
+        w("| Time | Level | Event | Details |")
+        w("|------|-------|-------|---------|")
         for ev in events:
             extras_str = ""
             if ev.get("extras"):
@@ -119,179 +118,179 @@ def write_debug_markdown(
                 f"| {ev['time']} | {level_badge} | `{ev['event']}` "
                 f"| {extras_str} |"
             )
-        w(f"")
-        w(f"---")
-        w(f"")
+        w("")
+        w("---")
+        w("")
 
     # ------------------------------------------------------------------
     # Intent Profile
     # ------------------------------------------------------------------
     intent = report.intent
-    w(f"## Intent Profile")
-    w(f"")
+    w("## Intent Profile")
+    w("")
     if intent.repo_purpose:
-        w(f"### Repo Purpose")
-        w(f"")
+        w("### Repo Purpose")
+        w("")
         w(intent.repo_purpose)
-        w(f"")
+        w("")
     if intent.deployment_context:
         w(f"**Deployment Context:** {intent.deployment_context}  ")
-        w(f"")
+        w("")
     if intent.pr_intent:
         w(f"**PR Intent:** {intent.pr_intent}  ")
     if intent.risk_surface_change:
         w(f"**Risk Surface Change:** {intent.risk_surface_change}  ")
-    w(f"")
+    w("")
 
     if intent.intended_capabilities:
         w(f"### Capabilities ({len(intent.intended_capabilities)})")
-        w(f"")
+        w("")
         for cap in intent.intended_capabilities:
             w(f"- {cap}")
-        w(f"")
+        w("")
 
     if intent.security_controls_detected:
         w(f"### Security Controls ({len(intent.security_controls_detected)})")
-        w(f"")
-        w(f"| Type | Location | Description |")
-        w(f"|------|----------|-------------|")
+        w("")
+        w("| Type | Location | Description |")
+        w("|------|----------|-------------|")
         for sc in intent.security_controls_detected:
             covers = ", ".join(sc.covers) if sc.covers else ""
             desc = sc.description
             if covers:
                 desc += f" *(covers: {covers})*"
             w(f"| `{sc.control_type}` | `{sc.location}` | {desc} |")
-        w(f"")
+        w("")
 
     if intent.trust_boundaries:
         w(f"### Trust Boundaries ({len(intent.trust_boundaries)})")
-        w(f"")
+        w("")
         for tb in intent.trust_boundaries:
             w(f"#### {tb.name}")
-            w(f"")
+            w("")
             w(tb.description)
             if tb.untrusted_inputs:
-                w(f"")
+                w("")
                 w(f"**Untrusted inputs:** {', '.join(f'`{i}`' for i in tb.untrusted_inputs)}")
             if tb.controls:
                 w(f"**Controls:** {', '.join(f'`{c}`' for c in tb.controls)}")
-            w(f"")
+            w("")
 
     if intent.sensitive_paths:
-        w(f"### Sensitive Paths")
-        w(f"")
+        w("### Sensitive Paths")
+        w("")
         for p in intent.sensitive_paths:
             w(f"- `{p}`")
-        w(f"")
+        w("")
 
-    w(f"---")
-    w(f"")
+    w("---")
+    w("")
 
     # ------------------------------------------------------------------
     # Context
     # ------------------------------------------------------------------
     ctx = report.context
-    w(f"## Context")
-    w(f"")
+    w("## Context")
+    w("")
     w(f"**Repo:** {ctx.repo_name}  ")
     if ctx.pr_title:
         w(f"**PR/Title:** {ctx.pr_title}  ")
     w(f"**Files Changed:** {len(ctx.files)}  ")
-    w(f"")
+    w("")
 
     if ctx.files:
-        w(f"### Files")
-        w(f"")
-        w(f"| File | Language | Status |")
-        w(f"|------|----------|--------|")
+        w("### Files")
+        w("")
+        w("| File | Language | Status |")
+        w("|------|----------|--------|")
         for f in ctx.files:
             status = "new" if f.is_new else ("deleted" if f.is_deleted else "modified")
             lang = f.language or "—"
             w(f"| `{f.path}` | {lang} | {status} |")
-        w(f"")
+        w("")
 
     if ctx.directory_structure:
-        w(f"### Directory Structure (excerpt)")
-        w(f"")
-        w(f"```")
+        w("### Directory Structure (excerpt)")
+        w("")
+        w("```")
         # Trim if very large
         ds = ctx.directory_structure
         if len(ds) > 3000:
             ds = ds[:3000] + "\n... (truncated)"
         w(ds)
-        w(f"```")
-        w(f"")
+        w("```")
+        w("")
 
     if ctx.readme_content:
-        w(f"### README (excerpt)")
-        w(f"")
+        w("### README (excerpt)")
+        w("")
         excerpt = ctx.readme_content[:1000]
         if len(ctx.readme_content) > 1000:
             excerpt += "\n... (truncated)"
-        w(f"```")
+        w("```")
         w(excerpt)
-        w(f"```")
-        w(f"")
+        w("```")
+        w("")
 
-    w(f"---")
-    w(f"")
+    w("---")
+    w("")
 
     # ------------------------------------------------------------------
     # Agent Reviews
     # ------------------------------------------------------------------
     if report.agent_reviews:
-        w(f"## Agent Reviews")
-        w(f"")
+        w("## Agent Reviews")
+        w("")
         for rev in report.agent_reviews:
             duration_str = ""
             if rev.review_duration_seconds:
                 duration_str = f" — {rev.review_duration_seconds:.1f}s"
             w(f"### {rev.agent_name.capitalize()}{duration_str}")
-            w(f"")
+            w("")
 
             if rev.review_methodology:
                 w(f"**Methodology:** {rev.review_methodology}")
-                w(f"")
+                w("")
             if rev.files_analyzed:
                 w(f"**Files analyzed:** {', '.join(f'`{f}`' for f in rev.files_analyzed)}")
-                w(f"")
+                w("")
 
             if rev.thinking_trace:
                 w(f"<details><summary>Reasoning trace ({len(rev.thinking_trace)} chars)</summary>")
-                w(f"")
-                w(f"```")
+                w("")
+                w("```")
                 w(rev.thinking_trace)
-                w(f"```")
-                w(f"")
-                w(f"</details>")
-                w(f"")
+                w("```")
+                w("")
+                w("</details>")
+                w("")
 
             if rev.findings:
                 w(f"**Raw findings from this agent ({len(rev.findings)}):**")
-                w(f"")
+                w("")
                 for i, finding in enumerate(rev.findings, 1):
                     w(f"#### {i}. {finding.title}")
-                    w(f"")
+                    w("")
                     w(f"**Severity:** {finding.severity.value} | **Confidence:** {finding.confidence:.2f} | **Status:** {finding.status.value}")
                     if finding.affected_files:
                         w(f"**Files:** {', '.join(f'`{af}`' for af in finding.affected_files)}")
                     if finding.rationale_summary:
-                        w(f"")
+                        w("")
                         w(finding.rationale_summary)
-                    w(f"")
+                    w("")
             else:
-                w(f"*No findings from this agent.*")
-                w(f"")
+                w("*No findings from this agent.*")
+                w("")
 
-        w(f"---")
-        w(f"")
+        w("---")
+        w("")
 
     # ------------------------------------------------------------------
     # Debates
     # ------------------------------------------------------------------
     if report.debates:
         w(f"## Debates ({len(report.debates)})")
-        w(f"")
+        w("")
         for debate in report.debates:
             # Find corresponding finding title
             finding_title = debate.finding_id
@@ -301,45 +300,45 @@ def write_debug_markdown(
                     break
 
             w(f"### {finding_title}")
-            w(f"")
+            w("")
             p = debate.prosecutor_argument
             d = debate.defense_argument
             j = debate.judge_ruling
             w(f"**Prosecutor ({p.agent_name}):** {p.position}")
-            w(f"")
+            w("")
             w(f"> {p.argument[:500]}{'...' if len(p.argument) > 500 else ''}")
-            w(f"")
+            w("")
             w(f"**Defense ({d.agent_name}):** {d.position}")
-            w(f"")
+            w("")
             w(f"> {d.argument[:500]}{'...' if len(d.argument) > 500 else ''}")
-            w(f"")
+            w("")
             if debate.round_2_prosecution:
                 rp = debate.round_2_prosecution
                 rd = debate.round_2_defense
                 w(f"**Round 2 — Prosecution ({rp.agent_name}):**")
                 w(f"> {rp.argument[:300]}{'...' if len(rp.argument) > 300 else ''}")
-                w(f"")
+                w("")
                 if rd:
                     w(f"**Round 2 — Defense ({rd.agent_name}):**")
                     w(f"> {rd.argument[:300]}{'...' if len(rd.argument) > 300 else ''}")
-                    w(f"")
+                    w("")
             w(f"**Judge ({j.agent_name}):** {j.position}")
-            w(f"")
+            w("")
             w(f"> {j.argument[:400]}{'...' if len(j.argument) > 400 else ''}")
-            w(f"")
+            w("")
             w(f"**Consensus:** `{debate.consensus.value}` | **Final Severity:** {debate.final_severity.value} | **Evidence quality:** {debate.evidence_quality}")
-            w(f"")
+            w("")
 
-        w(f"---")
-        w(f"")
+        w("---")
+        w("")
 
     # ------------------------------------------------------------------
     # Final report (full markdown)
     # ------------------------------------------------------------------
     from xfire.output.markdown_report import generate_markdown_report
 
-    w(f"## Final Report")
-    w(f"")
+    w("## Final Report")
+    w("")
     w(generate_markdown_report(report))
 
     # Write file

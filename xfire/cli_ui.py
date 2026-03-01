@@ -141,7 +141,7 @@ _DEBUG_LOG_MAX = 8  # max lines shown in the live debug log section
 class _HackerRenderable:
     """Rich renderable that calls HackerUI._render() fresh on every refresh."""
 
-    def __init__(self, ui: "HackerUI") -> None:
+    def __init__(self, ui: HackerUI) -> None:
         self._ui = ui
 
     def __rich_console__(self, console: Console, options: ConsoleOptions) -> RenderResult:
@@ -151,7 +151,7 @@ class _HackerRenderable:
 class _AgentTestRenderable:
     """Rich renderable that calls AgentTestUI._render() fresh on every refresh."""
 
-    def __init__(self, ui: "AgentTestUI") -> None:
+    def __init__(self, ui: AgentTestUI) -> None:
         self._ui = ui
 
     def __rich_console__(self, console: Console, options: ConsoleOptions) -> RenderResult:
@@ -368,8 +368,9 @@ class HackerUI:
 
     def _print_debate_argument(self, event_dict: dict) -> None:
         """Print one debate speech bubble above the Live area."""
-        from xfire.output.debate_view import _RESPONSE_INDENT, _bubble
         from rich.rule import Rule
+
+        from xfire.output.debate_view import _RESPONSE_INDENT, _bubble
 
         agent = str(event_dict.get("agent", ""))
         role = str(event_dict.get("role", ""))
@@ -414,6 +415,7 @@ class HackerUI:
         """Print the consensus verdict panel above the Live area."""
         from rich.panel import Panel
         from rich.text import Text
+
         from xfire.output.debate_view import _CONSENSUS_CONFIG, _SEVERITY_STYLE
 
         consensus = str(event_dict.get("consensus", "")).lower()
@@ -464,7 +466,7 @@ class HackerUI:
         self._console.print(Padding(header, pad=(0, 0, 0, 4)))
         self._console.print(Padding(panel, pad=(0, 0, 1, 4)))
 
-    def __enter__(self) -> "HackerUI":
+    def __enter__(self) -> HackerUI:
         self._live.start()
         return self
 
@@ -639,7 +641,7 @@ class AgentTestUI:
         except Exception:
             pass
 
-    def __enter__(self) -> "AgentTestUI":
+    def __enter__(self) -> AgentTestUI:
         self._live.start()
         return self
 

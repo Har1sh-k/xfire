@@ -3,7 +3,6 @@
 import asyncio
 from unittest.mock import AsyncMock
 
-from xfire.config.settings import RepoConfig
 from xfire.core.intent_inference import (
     IntentInferrer,
     _format_heuristic_for_prompt,

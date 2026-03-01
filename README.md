@@ -6,7 +6,7 @@
 
 [![PyPI](https://img.shields.io/pypi/v/xfire)](https://pypi.org/project/xfire/)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
-[![License: GPL v3](https://img.shields.io/badge/license-GPLv3-blue)](LICENSE)
+[![License: GPL v3](https://img.shields.io/badge/license-GPLv3-blue)](https://github.com/Har1sh-k/xfire/blob/main/LICENSE)
 [![CI](https://img.shields.io/github/actions/workflow/status/Har1sh-k/xfire/crossfire.yml?branch=main&label=CI)](https://github.com/Har1sh-k/xfire/actions)
 [![Substack](https://img.shields.io/badge/substack-subscribe-orange?logo=substack)](https://substack.com/@har1shk)
 
@@ -107,7 +107,7 @@ severity_gate:
   min_confidence: 0.7
 ```
 
-Full config reference: [`docs/architecture.md`](docs/architecture.md)
+Full config reference: [`docs/architecture.md`](https://github.com/Har1sh-k/xfire/blob/main/docs/architecture.md)
 
 ---
 
@@ -174,13 +174,13 @@ make format     # auto-fix formatting
 make demo       # run synthetic UI demo (no LLM calls)
 ```
 
-For architecture details, pipeline diagrams, component inventory, and data models see [`docs/architecture.md`](docs/architecture.md).
+For architecture details, pipeline diagrams, component inventory, and data models see [`docs/architecture.md`](https://github.com/Har1sh-k/xfire/blob/main/docs/architecture.md).
 
 ---
 
 ## License
 
-GNU General Public License v3.0 — see [LICENSE](LICENSE) for details.
+GNU General Public License v3.0 — see [LICENSE](https://github.com/Har1sh-k/xfire/blob/main/LICENSE) for details.
 
 ---
 

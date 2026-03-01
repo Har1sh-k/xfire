@@ -51,7 +51,7 @@ async def check_intent_changed(
     Returns True if baseline needs rebuild (material change detected).
     Returns False on model errors (safe default — skip rebuild).
     """
-    from xfire.agents.fast_model import FastModelUnavailable
+    from xfire.agents.fast_model import FastModelUnavailableError
 
     # Only send first 3000 chars of diff to keep it cheap
     diff_excerpt = diff_text[:3000]
@@ -82,7 +82,7 @@ Respond with JSON only: {{"material_change": true/false, "reason": "..."}}"""
             reason=reason[:100],
         )
         return material_change
-    except FastModelUnavailable as e:
+    except FastModelUnavailableError as e:
         logger.warning(
             "intent_change_check.unavailable",
             error=str(e),
@@ -173,7 +173,7 @@ async def build_context_system_prompt(
     Adapts the AUDIT_TEMPLATE to this repo using the fast model.
     Falls back to REVIEW_SYSTEM_PROMPT from review_prompt.py if fast model fails.
     """
-    from xfire.agents.fast_model import FastModelUnavailable
+    from xfire.agents.fast_model import FastModelUnavailableError
     from xfire.agents.prompts.review_prompt import REVIEW_SYSTEM_PROMPT
 
     intent = baseline.intent
@@ -223,7 +223,7 @@ Output ONLY the system prompt text. No preamble."""
             length=len(response),
         )
         return response
-    except FastModelUnavailable as e:
+    except FastModelUnavailableError as e:
         logger.warning(
             "context_prompt.unavailable",
             error=str(e),

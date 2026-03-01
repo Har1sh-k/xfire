@@ -18,11 +18,11 @@ Run via:  xfire demo --ui
 from __future__ import annotations
 
 import asyncio
-import structlog as _sl
 
-from xfire.cli_ui import HackerUI, render_banner, render_stats
+import structlog as _sl
 from rich.console import Console
 
+from xfire.cli_ui import HackerUI, render_banner, render_stats
 
 # ---------------------------------------------------------------------------
 # Shared helpers

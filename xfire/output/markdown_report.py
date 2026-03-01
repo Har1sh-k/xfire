@@ -7,7 +7,6 @@ from xfire.core.models import (
     DebateRecord,
     Finding,
     FindingStatus,
-    Severity,
 )
 
 
@@ -48,7 +47,6 @@ def generate_markdown_report(report: CrossFireReport) -> str:
     agent_status = " | ".join(
         f"{name} ✓" for name in report.agents_used
     ) if report.agents_used else "No agents"
-    depth = report.context.directory_structure[:20] + "..." if report.context.directory_structure else "N/A"
     file_count = len(report.context.files)
     duration = f"{report.review_duration_seconds:.0f}s" if report.review_duration_seconds else "N/A"
 
@@ -163,13 +161,13 @@ def _format_finding(finding: Finding, index: int, total_agents: int = 0) -> str:
 
     # Rationale
     if finding.rationale_summary:
-        parts.append(f"**What's wrong:**  ")
+        parts.append("**What's wrong:**  ")
         parts.append(finding.rationale_summary)
         parts.append("")
 
     # Data flow trace
     if finding.data_flow_trace:
-        parts.append(f"**Data flow:**  ")
+        parts.append("**Data flow:**  ")
         parts.append(f"`{finding.data_flow_trace}`")
         parts.append("")
 
@@ -185,7 +183,7 @@ def _format_finding(finding: Finding, index: int, total_agents: int = 0) -> str:
     # Purpose assessment
     pa = finding.purpose_aware_assessment
     if pa.assessment:
-        parts.append(f"**Purpose Assessment:**  ")
+        parts.append("**Purpose Assessment:**  ")
         parts.append(pa.assessment)
         parts.append("")
 

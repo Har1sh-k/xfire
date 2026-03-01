@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 logger = structlog.get_logger()
 
 
-class FastModelUnavailable(Exception):
+class FastModelUnavailableError(Exception):
     """Raised when the fast model cannot be reached via API or CLI."""
 
 
@@ -37,14 +37,14 @@ class FastModel:
         """Call the fast model, returning the text response.
 
         Tries API first; falls back to CLI if API key is unavailable.
-        Raises FastModelUnavailable if both fail.
+        Raises FastModelUnavailableError if both fail.
         """
         # Try API first
         api_key = os.environ.get(self.config.api_key_env, "")
         if api_key:
             try:
                 return await self._call_api(prompt, system)
-            except FastModelUnavailable:
+            except FastModelUnavailableError:
                 logger.warning(
                     "fast_model.api_failed",
                     msg="API call failed, falling back to CLI",
@@ -60,7 +60,7 @@ class FastModel:
         try:
             return await self._call_cli(prompt, system)
         except Exception as e:
-            raise FastModelUnavailable(
+            raise FastModelUnavailableError(
                 f"Fast model unavailable via both API and CLI: {e}"
             ) from e
 
@@ -69,13 +69,13 @@ class FastModel:
         try:
             import anthropic
         except ImportError as e:
-            raise FastModelUnavailable(
+            raise FastModelUnavailableError(
                 "anthropic SDK not installed. Run: pip install anthropic"
             ) from e
 
         api_key = os.environ.get(self.config.api_key_env, "")
         if not api_key:
-            raise FastModelUnavailable(
+            raise FastModelUnavailableError(
                 f"API key env var '{self.config.api_key_env}' not set"
             )
 
@@ -103,12 +103,12 @@ class FastModel:
                 if hasattr(block, "text")
             ]
             return "\n".join(text_parts)
-        except asyncio.TimeoutError as e:
-            raise FastModelUnavailable(
+        except TimeoutError as e:
+            raise FastModelUnavailableError(
                 f"API call timed out after {self.config.timeout}s"
             ) from e
         except Exception as e:
-            raise FastModelUnavailable(f"API call failed: {e}") from e
+            raise FastModelUnavailableError(f"API call failed: {e}") from e
 
     async def _call_cli(self, prompt: str, system: str) -> str:
         """Call the claude CLI subprocess as a fallback.
@@ -145,15 +145,15 @@ class FastModel:
                     proc.communicate(),
                     timeout=self.config.timeout,
                 )
-            except asyncio.TimeoutError as e:
+            except TimeoutError as e:
                 proc.kill()
-                raise FastModelUnavailable(
+                raise FastModelUnavailableError(
                     f"CLI timed out after {self.config.timeout}s"
                 ) from e
 
             if proc.returncode != 0:
                 err = stderr.decode(errors="replace") if stderr else ""
-                raise FastModelUnavailable(
+                raise FastModelUnavailableError(
                     f"CLI exited with code {proc.returncode}: {err[:300]}"
                 )
 
@@ -172,7 +172,7 @@ class FastModel:
             return raw
 
         except FileNotFoundError as e:
-            raise FastModelUnavailable(
+            raise FastModelUnavailableError(
                 f"CLI command not found: {cli_cmd}. Is it installed?"
             ) from e
         finally:

@@ -1,6 +1,5 @@
 """Tests for the context builder."""
 
-import os
 import subprocess
 
 from xfire.config.settings import AnalysisConfig

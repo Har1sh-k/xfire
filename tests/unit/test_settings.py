@@ -1,12 +1,9 @@
 """Tests for configuration loading (settings.py)."""
 
-import os
-from pathlib import Path
 
 import pytest
 
 from xfire.config.settings import (
-    AgentConfig,
     ConfigError,
     CrossFireSettings,
     _deep_merge,
@@ -61,7 +58,7 @@ class TestFindConfigFile:
     def test_env_override(self, tmp_path, monkeypatch):
         cfg_file = tmp_path / "custom.yaml"
         cfg_file.write_text("repo:\n  purpose: env\n")
-        monkeypatch.setenv("CROSSFIRE_CONFIG_PATH", str(cfg_file))
+        monkeypatch.setenv("XFIRE_CONFIG_PATH", str(cfg_file))
         result = _find_config_file(str(tmp_path))
         assert result == cfg_file
 

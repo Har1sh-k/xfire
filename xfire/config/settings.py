@@ -128,7 +128,7 @@ def _deep_merge(base: dict, override: dict) -> dict:
 
 def _find_config_file(repo_dir: str | None = None) -> Path | None:
     """Find .xfire/config.yaml in the repo or env override."""
-    env_path = os.environ.get("CROSSFIRE_CONFIG_PATH")
+    env_path = os.environ.get("XFIRE_CONFIG_PATH")
     if env_path:
         p = Path(env_path)
         if p.exists():

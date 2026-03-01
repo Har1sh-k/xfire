@@ -73,8 +73,8 @@ Be specific and technical. The intended_capabilities list is critical — it tel
 
 async def infer_with_llm(
     context: PRContext,
-    agent: "BaseAgent",
-    inferrer: "IntentInferrer | None" = None,
+    agent: BaseAgent,
+    inferrer: IntentInferrer | None = None,
 ) -> IntentProfile:
     """Run heuristic-first intent inference enriched by an LLM threat model.
 

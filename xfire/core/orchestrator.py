@@ -193,7 +193,7 @@ class CrossFireOrchestrator:
 
         # Build the review prompt using the whole-repo variant
         from xfire.agents.base import AgentError, BaseAgent
-        from xfire.agents.review_engine import AGENT_CLASSES, _create_agent, _parse_finding_from_raw
+        from xfire.agents.review_engine import _create_agent, _parse_finding_from_raw
 
         user_prompt = build_code_review_prompt(context, intent, skill_outputs)
 
@@ -206,7 +206,8 @@ class CrossFireOrchestrator:
                     logger.warning("agent.create_failed", agent=name, error=str(e))
 
         import time as _time
-        from xfire.core.models import AgentReview, Finding
+
+        from xfire.core.models import AgentReview
 
         async def _dispatch(agent: BaseAgent) -> AgentReview | None:
             t0 = _time.monotonic()

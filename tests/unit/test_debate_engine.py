@@ -1,6 +1,6 @@
 """Tests for the debate engine — role assignment, formatting, routing, and budget."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -11,7 +11,6 @@ from xfire.agents.debate_engine import (
     _format_evidence_text,
     _format_finding_summary,
     _format_intent_summary,
-    _parse_agent_argument,
 )
 from xfire.config.settings import AgentConfig, CrossFireSettings, DebateConfig
 from xfire.core.finding_synthesizer import (

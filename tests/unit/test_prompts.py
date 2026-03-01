@@ -9,12 +9,8 @@ from xfire.agents.prompts.judge_prompt import (
 from xfire.agents.prompts.prosecutor_prompt import build_prosecutor_prompt
 from xfire.agents.prompts.review_prompt import build_review_prompt
 from xfire.core.models import (
-    FileContext,
-    DiffHunk,
     IntentProfile,
     PRContext,
-    SecurityControl,
-    TrustBoundary,
 )
 
 

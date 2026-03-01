@@ -51,12 +51,12 @@ from xfire.auth import (
 )
 
 console = Console()
-_debug_collector: "DebugCollector | None" = None  # set by _apply_output_flags()
+_debug_collector: DebugCollector | None = None  # set by _apply_output_flags()
 
 
 def _apply_output_flags(
     silent: bool, debug: bool
-) -> "tuple[DebugCollector | None, bool]":
+) -> tuple[DebugCollector | None, bool]:
     """Configure console + structlog for --silent / --debug modes.
 
     Returns (collector, use_hacker_ui):
@@ -163,7 +163,7 @@ async def _preflight_check(settings) -> dict[str, tuple[bool, str]]:
                     results[name] = (False, f"exited {proc.returncode}")
             except FileNotFoundError:
                 results[name] = (False, f"not found: {cfg.cli_command}")
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 results[name] = (False, "timed out")
             except Exception as e:
                 results[name] = (False, str(e)[:80])
@@ -284,8 +284,9 @@ def auth_login(
             console.print("     CrossFire will read ~/.codex/auth.json automatically.")
 
     else:  # gemini
-        from xfire.auth.store import _is_expired
         import time as _time
+
+        from xfire.auth.store import _is_expired
 
         result = read_gemini_cli_credentials()
         if result:
@@ -361,7 +362,7 @@ def analyze_pr(
     format: str = typer.Option("markdown", help="Output format: markdown|json|sarif"),
     post_comment: bool = typer.Option(False, help="Post review as GitHub PR comment"),
     cache_dir: str | None = typer.Option(
-        None, envvar="CROSSFIRE_CACHE_DIR",
+        None, envvar="XFIRE_CACHE_DIR",
         help="Cache directory for context/intent persistence across runs",
     ),
     verbose: bool = typer.Option(False, help="Enable verbose logging"),
@@ -398,8 +399,9 @@ def analyze_pr(
 
     enabled_agents = [n for n, c in settings.agents.items() if c.enabled]
 
-    from xfire.cli_ui import HackerUI, render_banner, render_stats
     import structlog as _sl
+
+    from xfire.cli_ui import HackerUI, render_banner, render_stats
     _ui = HackerUI(
         repo=repo,
         mode=f"pr #{pr}",
@@ -477,7 +479,7 @@ def analyze_diff(
     output: str | None = typer.Option(None, help="Output file path"),
     format: str = typer.Option("markdown", help="Output format: markdown|json|sarif"),
     cache_dir: str | None = typer.Option(
-        None, envvar="CROSSFIRE_CACHE_DIR",
+        None, envvar="XFIRE_CACHE_DIR",
         help="Cache directory for context/intent persistence across runs",
     ),
     thinking: bool = typer.Option(False, "--thinking", help="Enable extended thinking/reasoning for all agents"),
@@ -587,8 +589,9 @@ def analyze_diff(
 
     enabled_agents = [n for n, c in settings.agents.items() if c.enabled]
 
-    from xfire.cli_ui import HackerUI, render_banner, render_stats
     import structlog as _sl
+
+    from xfire.cli_ui import HackerUI, render_banner, render_stats
     _ui = HackerUI(
         repo=repo_dir,
         mode=mode,
@@ -717,8 +720,9 @@ def code_review(
             "No agents are reachable. Check your CLI tool paths in .xfire/config.yaml."
         )
 
-    from xfire.cli_ui import HackerUI, render_banner, render_stats
     import structlog as _sl
+
+    from xfire.cli_ui import HackerUI, render_banner, render_stats
     _ui = HackerUI(
         repo=repo_dir,
         mode="full-repo",
@@ -983,7 +987,8 @@ def scan(
     # Build Claude agent for LLM-based intent/threat-model inference
     from xfire.agents.claude_adapter import ClaudeAgent
     claude_cfg = settings.agents.get("claude")
-    intent_agent = ClaudeAgent(claude_cfg) if claude_cfg and claude_cfg.enabled and preflight.get("claude", (False,))[0] else None
+    claude_ok = claude_cfg and claude_cfg.enabled and preflight.get("claude", (False,))[0]
+    intent_agent = ClaudeAgent(claude_cfg) if claude_ok else None
 
     # Baseline management
     mgr = BaselineManager(repo_dir)
@@ -1092,9 +1097,9 @@ def debates(
     Example:
       xfire debates --input xfire-results.json
     """
+    from xfire.cli_ui import render_banner
     from xfire.core.models import CrossFireReport
     from xfire.output.debate_view import render_debates
-    from xfire.cli_ui import render_banner
 
     input_path = Path(input)
     if not input_path.exists():
@@ -1249,7 +1254,7 @@ def test_llm(
                 used_mode = f"{config.mode}→{used_mode}"
             _test_ui.set_done(name, True, snippet)
             return (name, True, used_mode, snippet, elapsed, thinking_preview, raw.strip())
-        except asyncio.TimeoutError:
+        except TimeoutError:
             used_mode = agent.effective_mode
             if used_mode != config.mode:
                 used_mode = f"{config.mode}→{used_mode}"
@@ -1349,6 +1354,7 @@ def demo(
       xfire demo --fixture auth_bypass_regression
     """
     import asyncio
+
     from rich.console import Console as _Console
     from rich.text import Text as _Text
 
@@ -1402,12 +1408,11 @@ def demo(
         console.print(f"Available fixtures: {', '.join(available)}")
         raise typer.Exit(1)
 
+    from xfire.cli_ui import render_banner, render_stats
     from xfire.config.settings import load_settings
     from xfire.core.context_builder import parse_diff
     from xfire.core.models import PRContext
     from xfire.core.orchestrator import CrossFireOrchestrator
-
-    from xfire.cli_ui import render_banner, render_stats
     console.print(render_banner())
     console.print(render_stats(repo=f"fixture/{fixture}", mode="demo"))
 

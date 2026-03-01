@@ -9,7 +9,6 @@ from xfire.core.models import (
     AgentReview,
     Finding,
     FindingCategory,
-    FindingStatus,
     IntentProfile,
     PRContext,
     Severity,

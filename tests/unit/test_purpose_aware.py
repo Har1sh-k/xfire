@@ -4,18 +4,12 @@ from xfire.core.finding_synthesizer import FindingSynthesizer
 from xfire.core.intent_inference import IntentInferrer
 from xfire.core.models import (
     AgentReview,
-    DiffHunk,
-    Evidence,
-    FileContext,
     Finding,
     FindingCategory,
     IntentProfile,
-    LineRange,
     PRContext,
     PurposeAssessment,
-    SecurityControl,
     Severity,
-    TrustBoundary,
 )
 
 

@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from xfire.core.models import IntentProfile, PRContext
 from xfire.agents.prompts.guardrails import (
     inject_guard_preamble,
     wrap_agent_output,
     wrap_external,
 )
+from xfire.core.models import IntentProfile, PRContext
 
 REVIEW_SYSTEM_PROMPT = """You are an elite security engineer performing a thorough code review of a pull request.
 
@@ -216,7 +216,7 @@ def build_review_prompt(
         )
     else:
         sections.append(
-            f"## Analysis: " + wrap_external(context.pr_title, "pr-title")
+            "## Analysis: " + wrap_external(context.pr_title, "pr-title")
         )
 
     sections.append(

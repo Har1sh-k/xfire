@@ -8,7 +8,6 @@ from xfire.core.finding_synthesizer import (
 )
 from xfire.core.models import (
     AgentReview,
-    BlastRadius,
     DebateTag,
     Evidence,
     Finding,

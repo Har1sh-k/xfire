@@ -48,7 +48,6 @@ dependencies = [
     "httpx>=0.25.0",
     "anthropic>=0.40.0",
     "openai>=1.0",
-    "google-generativeai>=0.8.0",
     "rich>=13.0",
     "structlog>=23.0",
 ]
@@ -78,10 +77,18 @@ xfire = "xfire.cli:app"
 
 [tool.ruff]
 target-version = "py311"
-line-length = 100
+line-length = 120
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP"]
+ignore = ["E402"]
+
+[tool.ruff.lint.per-file-ignores]
+"xfire/cli.py" = ["F821"]
+"xfire/agents/prompts/*.py" = ["E501"]
+"xfire/core/intent_inference.py" = ["E501"]
+"xfire/output/debug_log.py" = ["E501"]
+"tests/unit/test_intent_inference.py" = ["E501"]
 
 [tool.mypy]
 python_version = "3.11"

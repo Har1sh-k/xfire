@@ -11,9 +11,8 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -142,7 +141,7 @@ class BaselineManager:
         settings: CrossFireSettings | None = None,
         head_commit: str = "",
         base_ref: str = "",
-        agent: "BaseAgent | None" = None,
+        agent: BaseAgent | None = None,
     ) -> Baseline:
         """Build baseline from the repo context and write all files.
 
@@ -175,7 +174,7 @@ class BaselineManager:
         settings: CrossFireSettings | None = None,
         head_commit: str = "",
         base_ref: str = "",
-        agent: "BaseAgent | None" = None,
+        agent: BaseAgent | None = None,
     ) -> Baseline:
         """Internal build logic — runs intent inference on repo at base_ref.
 
@@ -250,7 +249,7 @@ class BaselineManager:
             intent = inferrer.infer(context)
 
         # Build context.md
-        now = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        now = datetime.now(UTC).strftime("%Y-%m-%d")
         context_md = _build_context_md(intent, head_commit, now)
 
         # Write all files
@@ -263,7 +262,7 @@ class BaselineManager:
         # Write initial scan_state
         scan_state = ScanState(
             baseline_commit=head_commit,
-            baseline_built_at=datetime.now(timezone.utc).isoformat(),
+            baseline_built_at=datetime.now(UTC).isoformat(),
         )
         (self.baseline_dir / SCAN_STATE_JSON).write_text(
             json.dumps(scan_state.to_dict(), indent=2), encoding="utf-8"
@@ -363,7 +362,7 @@ class BaselineManager:
             scan_state = ScanState()
 
         scan_state.last_scanned_commit = head_commit
-        scan_state.last_scanned_at = datetime.now(timezone.utc).isoformat()
+        scan_state.last_scanned_at = datetime.now(UTC).isoformat()
         scan_state.total_scans += 1
 
         scan_state_path.write_text(
@@ -379,7 +378,7 @@ class BaselineManager:
                 existing[kf.fingerprint] = kf
 
         from xfire.core.models import FindingStatus
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
 
         for finding in confirmed_findings:
             if finding.status not in (FindingStatus.CONFIRMED, FindingStatus.LIKELY):

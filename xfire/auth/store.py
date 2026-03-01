@@ -50,12 +50,12 @@ class AuthStore(BaseModel):
 def resolve_auth_path(repo_dir: str | None = None) -> Path:
     """Resolve auth storage path.
 
-    Priority: CROSSFIRE_AUTH_PATH > <repo_dir>/.xfire/auth.json > cwd/.xfire/auth.json.
+    Priority: XFIRE_AUTH_PATH > <repo_dir>/.xfire/auth.json > cwd/.xfire/auth.json.
     """
     import os
 
-    if os.environ.get("CROSSFIRE_AUTH_PATH"):
-        return Path(os.environ["CROSSFIRE_AUTH_PATH"]).expanduser()
+    if os.environ.get("XFIRE_AUTH_PATH"):
+        return Path(os.environ["XFIRE_AUTH_PATH"]).expanduser()
     if repo_dir:
         return Path(repo_dir) / ".xfire" / "auth.json"
     return Path.cwd() / ".xfire" / "auth.json"

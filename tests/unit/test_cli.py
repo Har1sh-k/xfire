@@ -1,6 +1,5 @@
 """Tests for CLI helper functions."""
 
-from unittest.mock import MagicMock, patch
 
 import pytest
 import typer
@@ -21,8 +20,8 @@ from xfire.core.models import (
     Finding,
     FindingCategory,
     FindingStatus,
-    PRContext,
     IntentProfile,
+    PRContext,
     Severity,
 )
 
@@ -151,7 +150,9 @@ class TestPrintJudgeQuestions:
 
     def test_renders_without_error(self):
         from io import StringIO
+
         from rich.console import Console
+
         from xfire.cli_ui import HackerUI
 
         buf = StringIO()
@@ -167,7 +168,9 @@ class TestPrintJudgeQuestions:
 
     def test_skips_empty_questions(self):
         from io import StringIO
+
         from rich.console import Console
+
         from xfire.cli_ui import HackerUI
 
         buf = StringIO()

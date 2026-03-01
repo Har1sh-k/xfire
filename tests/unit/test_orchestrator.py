@@ -147,7 +147,7 @@ class TestRunPipeline:
         review = AgentReview(agent_name="claude", findings=[finding])
         with (
             patch.object(orch.review_engine, "run_independent_reviews", new_callable=AsyncMock, return_value=[review]),
-            patch.object(orch.debate_engine, "debate_all", new_callable=AsyncMock, return_value=[]) as mock_debate,
+            patch.object(orch.debate_engine, "debate_all", new_callable=AsyncMock, return_value=[]),
         ):
             await orch._run_pipeline(_make_context())
         # debate_all should be called if there are NEEDS_DEBATE findings
@@ -207,7 +207,7 @@ class TestRunSkills:
         ctx = _make_context()
         with patch(
             "xfire.core.orchestrator.DataFlowTracingSkill"
-        ) as MockSkill:
-            MockSkill.return_value.execute.side_effect = RuntimeError("boom")
+        ) as mock_skill:
+            mock_skill.return_value.execute.side_effect = RuntimeError("boom")
             result = orch._run_skills(ctx, IntentProfile(), str(tmp_path))
         assert result.get("data_flow") == "Not available"

@@ -1322,8 +1322,8 @@ All previously identified sync-in-async issues have been resolved:
 ```
 Source Priority (highest wins):
   1. CLI flags (--context-depth, --agents, --skip-debate, etc.)
-  2. Environment: CROSSFIRE_CONFIG_PATH, GITHUB_TOKEN, API key env vars
-  3. .xfire/config.yaml (in repo root or CROSSFIRE_CONFIG_PATH)
+  2. Environment: XFIRE_CONFIG_PATH, GITHUB_TOKEN, API key env vars
+  3. .xfire/config.yaml (in repo root or XFIRE_CONFIG_PATH)
   4. xfire/config/defaults.py DEFAULT_CONFIG
 
 Loading:
@@ -1331,7 +1331,7 @@ Loading:
        │
        ├─ copy.deepcopy(DEFAULT_CONFIG)           ← Layer 4: defaults
        ├─ _find_config_file(repo_dir)             ← Layer 3: YAML file
-       │   └─ CROSSFIRE_CONFIG_PATH env           ← Layer 2: env override
+       │   └─ XFIRE_CONFIG_PATH env               ← Layer 2: env override
        ├─ _deep_merge(defaults, yaml)
        ├─ _deep_merge(merged, cli_overrides)      ← Layer 1: CLI flags
        └─ _parse_agents_config(merged)

@@ -1,6 +1,5 @@
 """Tests for the GitHub PR loader — error handling and helpers."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 

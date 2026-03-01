@@ -6,7 +6,6 @@ import structlog
 
 from xfire.core.models import (
     AgentReview,
-    BlastRadius,
     DebateTag,
     Evidence,
     Finding,

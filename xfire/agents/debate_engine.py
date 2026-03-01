@@ -9,11 +9,11 @@ from xfire.agents.claude_adapter import ClaudeAgent
 from xfire.agents.codex_adapter import CodexAgent
 from xfire.agents.consensus import compute_consensus
 from xfire.agents.gemini_adapter import GeminiAgent
-from xfire.agents.prompts.guardrails import wrap_agent_output, wrap_external
 from xfire.agents.prompts.defense_prompt import (
     DEFENSE_SYSTEM_PROMPT,
     build_defense_prompt,
 )
+from xfire.agents.prompts.guardrails import wrap_agent_output, wrap_external
 from xfire.agents.prompts.judge_prompt import (
     JUDGE_CLARIFICATION_SYSTEM_PROMPT,
     JUDGE_SYSTEM_PROMPT,

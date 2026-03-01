@@ -1,10 +1,9 @@
 """Tests for agent adapters (Claude, Codex, Gemini) — mock subprocess and API."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from xfire.agents.base import AgentError
 from xfire.agents.claude_adapter import ClaudeAgent
 from xfire.agents.codex_adapter import CodexAgent
 from xfire.agents.gemini_adapter import GeminiAgent
