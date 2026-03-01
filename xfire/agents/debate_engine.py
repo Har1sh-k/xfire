@@ -155,6 +155,7 @@ class DebateEngine:
         context: PRContext,
         intent: IntentProfile,
         debate_budget: int | None = None,
+        repo_dir: str | None = None,
     ) -> list[tuple[Finding, DebateRecord]]:
         """Run debates on all findings that need it, respecting budget.
 
@@ -184,7 +185,7 @@ class DebateEngine:
                 continue
 
             try:
-                debate = await self._debate_single(finding, context, intent)
+                debate = await self._debate_single(finding, context, intent, repo_dir=repo_dir)
                 if debate:
                     self._apply_debate_result(finding, debate)
                     results.append((finding, debate))
@@ -205,6 +206,7 @@ class DebateEngine:
         finding: Finding,
         context: PRContext,
         intent: IntentProfile,
+        repo_dir: str | None = None,
     ) -> DebateRecord | None:
         """Run a single structured debate for one finding.
 
@@ -239,7 +241,7 @@ class DebateEngine:
                 continue
             cls = AGENT_CLASSES.get(name)
             if cls:
-                agents[name] = cls(config)
+                agents[name] = cls(config, repo_dir=repo_dir)
 
         available_count = len(agents)
         min_required = self.settings.debate.min_agents_for_debate

@@ -264,6 +264,7 @@ class CrossFireOrchestrator:
                     context=context,
                     intent=intent,
                     debate_budget=budget,
+                    repo_dir=repo_dir,
                 )
                 debates = [dr for _, dr in debate_results]
 
@@ -403,6 +404,7 @@ class CrossFireOrchestrator:
                     context=context,
                     intent=intent,
                     debate_budget=budget,
+                    repo_dir=repo_dir,
                 )
                 debates = [dr for _, dr in debate_results]
                 logger.info("pipeline.debate_complete", debates=len(debates))
@@ -568,6 +570,7 @@ class CrossFireOrchestrator:
                     context=context,
                     intent=intent,
                     debate_budget=budget,
+                    repo_dir=repo_dir,
                 )
                 debates = [dr for _, dr in debate_results]
                 logger.info("pipeline.debate_complete", debates=len(debates))
