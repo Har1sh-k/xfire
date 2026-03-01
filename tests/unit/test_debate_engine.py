@@ -4,8 +4,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from crossfire.agents.base import AgentError
-from crossfire.agents.debate_engine import (
+from xfire.agents.base import AgentError
+from xfire.agents.debate_engine import (
     DebateEngine,
     _format_context_summary,
     _format_evidence_text,
@@ -13,13 +13,13 @@ from crossfire.agents.debate_engine import (
     _format_intent_summary,
     _parse_agent_argument,
 )
-from crossfire.config.settings import AgentConfig, CrossFireSettings, DebateConfig
-from crossfire.core.finding_synthesizer import (
+from xfire.config.settings import AgentConfig, CrossFireSettings, DebateConfig
+from xfire.core.finding_synthesizer import (
     FindingSynthesizer,
     compute_debate_budget,
     merge_severity,
 )
-from crossfire.core.models import (
+from xfire.core.models import (
     AgentArgument,
     AgentReview,
     ConsensusOutcome,

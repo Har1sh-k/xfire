@@ -5,17 +5,17 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from crossfire.skills.code_navigation import CodeNavigationSkill, ImportRef
-from crossfire.skills.config_analysis import ConfigAnalysisSkill
-from crossfire.skills.data_flow_tracing import DataFlowTracingSkill
-from crossfire.skills.dependency_analysis import (
+from xfire.skills.code_navigation import CodeNavigationSkill, ImportRef
+from xfire.skills.config_analysis import ConfigAnalysisSkill
+from xfire.skills.data_flow_tracing import DataFlowTracingSkill
+from xfire.skills.dependency_analysis import (
     DependencyAnalysisSkill,
     _parse_pyproject_deps,
     _parse_requirements_txt,
     _parse_package_json_deps,
 )
-from crossfire.skills.git_archeology import GitArcheologySkill
-from crossfire.skills.test_coverage_check import TestCoverageCheckSkill
+from xfire.skills.git_archeology import GitArcheologySkill
+from xfire.skills.test_coverage_check import TestCoverageCheckSkill
 
 
 class TestCodeNavigation:

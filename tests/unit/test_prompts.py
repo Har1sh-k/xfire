@@ -1,14 +1,14 @@
 """Tests for prompt builder functions."""
 
-from crossfire.agents.prompts.defense_prompt import build_defense_prompt
-from crossfire.agents.prompts.judge_prompt import (
+from xfire.agents.prompts.defense_prompt import build_defense_prompt
+from xfire.agents.prompts.judge_prompt import (
     build_judge_clarification_prompt,
     build_judge_final_prompt,
     build_judge_prompt,
 )
-from crossfire.agents.prompts.prosecutor_prompt import build_prosecutor_prompt
-from crossfire.agents.prompts.review_prompt import build_review_prompt
-from crossfire.core.models import (
+from xfire.agents.prompts.prosecutor_prompt import build_prosecutor_prompt
+from xfire.agents.prompts.review_prompt import build_review_prompt
+from xfire.core.models import (
     FileContext,
     DiffHunk,
     IntentProfile,

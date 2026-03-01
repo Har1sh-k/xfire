@@ -9,10 +9,10 @@ from pathlib import Path
 
 import pytest
 
-from crossfire.core.context_builder import ContextBuilder, parse_diff
-from crossfire.core.intent_inference import IntentInferrer
-from crossfire.core.finding_synthesizer import FindingSynthesizer
-from crossfire.core.models import (
+from xfire.core.context_builder import ContextBuilder, parse_diff
+from xfire.core.intent_inference import IntentInferrer
+from xfire.core.finding_synthesizer import FindingSynthesizer
+from xfire.core.models import (
     AgentReview,
     Finding,
     FindingCategory,
@@ -20,11 +20,11 @@ from crossfire.core.models import (
     PRContext,
     Severity,
 )
-from crossfire.config.settings import AnalysisConfig, load_settings
-from crossfire.output.markdown_report import generate_markdown_report
-from crossfire.output.json_report import generate_json_report
-from crossfire.output.sarif_report import generate_sarif_report
-from crossfire.core.models import CrossFireReport
+from xfire.config.settings import AnalysisConfig, load_settings
+from xfire.output.markdown_report import generate_markdown_report
+from xfire.output.json_report import generate_json_report
+from xfire.output.sarif_report import generate_sarif_report
+from xfire.core.models import CrossFireReport
 
 FIXTURES = Path(__file__).parent.parent / "fixtures" / "prs"
 

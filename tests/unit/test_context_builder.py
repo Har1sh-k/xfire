@@ -3,8 +3,8 @@
 import os
 import subprocess
 
-from crossfire.config.settings import AnalysisConfig
-from crossfire.core.context_builder import (
+from xfire.config.settings import AnalysisConfig
+from xfire.core.context_builder import (
     ContextBuilder,
     _find_imports_js,
     _find_imports_python,

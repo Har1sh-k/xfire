@@ -4,15 +4,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from crossfire.agents.base import AgentError
-from crossfire.agents.review_engine import (
+from xfire.agents.base import AgentError
+from xfire.agents.review_engine import (
     ReviewEngine,
     _create_agent,
     _parse_enum_flexible,
     _parse_finding_from_raw,
 )
-from crossfire.config.settings import AgentConfig, CrossFireSettings
-from crossfire.core.models import (
+from xfire.config.settings import AgentConfig, CrossFireSettings
+from xfire.core.models import (
     BlastRadius,
     Exploitability,
     FindingCategory,
@@ -177,7 +177,7 @@ class TestRunIndependentReviews:
         engine = ReviewEngine(settings)
         mock_response = '{"findings": [], "overall_risk": "none"}'
         with patch(
-            "crossfire.agents.review_engine._create_agent"
+            "xfire.agents.review_engine._create_agent"
         ) as mock_create:
             mock_agent = MagicMock()
             mock_agent.name = "claude"
@@ -206,7 +206,7 @@ class TestRunIndependentReviews:
         )
         engine = ReviewEngine(settings)
         with patch(
-            "crossfire.agents.review_engine._create_agent"
+            "xfire.agents.review_engine._create_agent"
         ) as mock_create:
             mock_claude = MagicMock()
             mock_claude.name = "claude"

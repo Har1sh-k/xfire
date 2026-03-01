@@ -1,12 +1,12 @@
 """Tests for finding synthesizer."""
 
-from crossfire.core.finding_synthesizer import (
+from xfire.core.finding_synthesizer import (
     FindingSynthesizer,
     _is_similar_finding,
     compute_debate_budget,
     merge_severity,
 )
-from crossfire.core.models import (
+from xfire.core.models import (
     AgentReview,
     BlastRadius,
     DebateTag,

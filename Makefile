@@ -13,25 +13,25 @@ test-integration:
 	pytest tests/integration/ -v
 
 lint:
-	ruff check crossfire/ tests/
-	ruff format --check crossfire/ tests/
-	mypy crossfire/
+	ruff check xfire/ tests/
+	ruff format --check xfire/ tests/
+	mypy xfire/
 
 format:
-	ruff check --fix crossfire/ tests/
-	ruff format crossfire/ tests/
+	ruff check --fix xfire/ tests/
+	ruff format xfire/ tests/
 
 demo:
-	crossfire demo --ui
+	xfire demo --ui
 
 demo-github:
-	crossfire analyze-pr --repo owner/repo --pr 1
+	xfire analyze-pr --repo owner/repo --pr 1
 
 eval:
 	@echo "Running evaluation harness on fixture PRs..."
 	@for fixture in tests/fixtures/prs/*/; do \
 		echo "Evaluating $$(basename $$fixture)..."; \
-		crossfire demo --fixture $$(basename $$fixture); \
+		xfire demo --fixture $$(basename $$fixture); \
 	done
 
 cost-estimate:

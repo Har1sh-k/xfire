@@ -2,7 +2,7 @@
 
 import pytest
 
-from crossfire.integrations.github.comment_poster import post_review_comment
+from xfire.integrations.github.comment_poster import post_review_comment
 
 
 class TestPostReviewComment:

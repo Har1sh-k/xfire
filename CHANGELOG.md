@@ -25,10 +25,10 @@ Initial public release.
 - **GitHub integration** — automatic PR comment posting with update-in-place
 - **Live terminal UI** — animated phase spinners, debate transcript viewer, and severity badges
 - **CLI credential readers** — reads Claude, Codex, and Gemini credentials from their native CLI config files
-- **Demo mode** — `crossfire demo --ui` runs against 7 synthetic fixture scenarios without needing API keys
+- **Demo mode** — `xfire demo --ui` runs against 7 synthetic fixture scenarios without needing API keys
 - **Policy engine** — suppression rules by category, file pattern, or title pattern
 - **Severity gate** — `--fail-on` flag for CI integration that exits non-zero when severity threshold is breached
-- **Context caching** — persists PR context and intent profiles to `.crossfire/cache/` for faster re-runs
+- **Context caching** — persists PR context and intent profiles to `.xfire/cache/` for faster re-runs
 - **Prompt injection guardrails** — structural defenses in all agent prompts
 - **Comprehensive test suite** — 380+ unit and integration tests
 - **Full documentation** — architecture, threat model, finding schema, prompting strategy, review methodology, and evaluation plan
@@ -37,7 +37,7 @@ Initial public release.
 
 - All credentials read from environment variables or native CLI config files at runtime — nothing hardcoded
 - Subprocess execution uses `asyncio.create_subprocess_exec` without `shell=True`
-- Auth tokens isolated in `.crossfire/auth.json` (gitignored)
-- Structural prompt injection guards in `crossfire/agents/prompts/guardrails.py`
+- Auth tokens isolated in `.xfire/auth.json` (gitignored)
+- Structural prompt injection guards in `xfire/agents/prompts/guardrails.py`
 
-[0.1.0]: https://github.com/Har1sh-k/CrossFire/releases/tag/v0.1.0
+[0.1.0]: https://github.com/Har1sh-k/xfire/releases/tag/v0.1.0

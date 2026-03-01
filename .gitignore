@@ -207,11 +207,11 @@ marimo/_lsp/
 __marimo__/
 
 # CrossFire generated files
-crossfire-debug-*.md
+xfire-debug-*.md
 results.md
-.crossfire/auth.json
-.crossfire/baseline/
-.crossfire/cache/
+.xfire/auth.json
+.xfire/baseline/
+.xfire/cache/
 
 # Secrets and certificates
 *.key

@@ -20,19 +20,19 @@ jobs:
       - name: Restore CrossFire cache
         uses: actions/cache@v4
         with:
-          path: .crossfire/cache
-          key: crossfire-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+          path: .xfire/cache
+          key: xfire-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
           restore-keys: |
-            crossfire-${{ github.event.pull_request.number }}-
-            crossfire-
+            xfire-${{ github.event.pull_request.number }}-
+            xfire-
 
-      - run: pip install crossfire
+      - run: pip install xfire
       - run: |
-          crossfire analyze-pr \
+          xfire analyze-pr \
             --repo ${{ github.repository }} \
             --pr ${{ github.event.pull_request.number }} \
             --github-token ${{ secrets.GITHUB_TOKEN }} \
-            --cache-dir .crossfire/cache \
+            --cache-dir .xfire/cache \
             --format markdown \
             --post-comment
         env:

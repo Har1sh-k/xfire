@@ -1,7 +1,7 @@
 """Tests for consensus logic."""
 
-from crossfire.agents.consensus import compute_consensus, _evidence_quality_score
-from crossfire.core.models import (
+from xfire.agents.consensus import compute_consensus, _evidence_quality_score
+from xfire.core.models import (
     AgentArgument,
     CitedEvidence,
     ConsensusOutcome,

@@ -2,7 +2,7 @@
 
 import json
 
-from crossfire.core.models import (
+from xfire.core.models import (
     AgentReview,
     CrossFireReport,
     Evidence,
@@ -13,9 +13,9 @@ from crossfire.core.models import (
     PRContext,
     Severity,
 )
-from crossfire.output.json_report import generate_json_report
-from crossfire.output.markdown_report import generate_markdown_report
-from crossfire.output.sarif_report import generate_sarif_report
+from xfire.output.json_report import generate_json_report
+from xfire.output.markdown_report import generate_markdown_report
+from xfire.output.sarif_report import generate_sarif_report
 
 
 def _make_report(
@@ -165,7 +165,7 @@ class TestSarifReport:
         sarif = json.loads(generate_sarif_report(report))
         result = sarif["runs"][0]["results"][0]
         assert "partialFingerprints" in result
-        assert "crossfire/v1" in result["partialFingerprints"]
+        assert "xfire/v1" in result["partialFingerprints"]
 
     def test_rank_present(self):
         report = _make_report(findings=[_make_finding()])
@@ -188,8 +188,8 @@ class TestSarifReport:
         report = _make_report(findings=[_make_finding()])
         sarif = json.loads(generate_sarif_report(report))
         props = sarif["runs"][0]["properties"]
-        assert "crossfire:agentsUsed" in props
-        assert "crossfire:overallRisk" in props
+        assert "xfire:agentsUsed" in props
+        assert "xfire:overallRisk" in props
 
     def test_empty_findings(self):
         report = _make_report()

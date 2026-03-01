@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "crossfire"
+name = "xfire"
 version = "0.1.0"
 description = "Multiple agents. One verdict. Zero blind spots."
 readme = "README.md"
@@ -54,12 +54,15 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/Har1sh-k/CrossFire"
-Repository = "https://github.com/Har1sh-k/CrossFire"
-Issues = "https://github.com/Har1sh-k/CrossFire/issues"
-Documentation = "https://github.com/Har1sh-k/CrossFire/tree/main/docs"
-Changelog = "https://github.com/Har1sh-k/CrossFire/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/Har1sh-k/xfire"
+Repository = "https://github.com/Har1sh-k/xfire"
+Issues = "https://github.com/Har1sh-k/xfire/issues"
+Documentation = "https://github.com/Har1sh-k/xfire/tree/main/docs"
+Changelog = "https://github.com/Har1sh-k/xfire/blob/main/CHANGELOG.md"
 Blog = "https://harishkolla.substack.com/"
+
+[tool.hatch.build.targets.wheel]
+packages = ["xfire"]
 
 [project.optional-dependencies]
 dev = [
@@ -71,7 +74,7 @@ dev = [
 ]
 
 [project.scripts]
-crossfire = "crossfire.cli:app"
+xfire = "xfire.cli:app"
 
 [tool.ruff]
 target-version = "py311"

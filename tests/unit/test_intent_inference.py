@@ -3,14 +3,14 @@
 import asyncio
 from unittest.mock import AsyncMock
 
-from crossfire.config.settings import RepoConfig
-from crossfire.core.intent_inference import (
+from xfire.config.settings import RepoConfig
+from xfire.core.intent_inference import (
     IntentInferrer,
     _format_heuristic_for_prompt,
     _merge_profiles,
     infer_with_llm,
 )
-from crossfire.core.models import (
+from xfire.core.models import (
     DiffHunk,
     FileContext,
     IntentProfile,

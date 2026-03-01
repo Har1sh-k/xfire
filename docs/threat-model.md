@@ -35,7 +35,7 @@ Since CrossFire includes PR descriptions, commit messages, and code in agent pro
 - PR descriptions are included as data, not instructions
 - Agent prompts explicitly instruct to review code, not follow embedded instructions
 - Output is parsed as structured JSON, limiting execution scope
-- `crossfire/agents/prompts/guardrails.py` — structural prompt injection protection:
+- `xfire/agents/prompts/guardrails.py` — structural prompt injection protection:
   - `inject_guard_preamble()` appended to all 5 system prompts (review, prosecutor, defense, judge ×2)
   - `wrap_external(text, source)` wraps GitHub/user content in `<external_data source="...">` tags
   - `wrap_agent_output(text, agent)` wraps prior LLM outputs in `<agent_output agent="...">` tags

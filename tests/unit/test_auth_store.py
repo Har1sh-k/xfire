@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 
-from crossfire.auth.store import (
+from xfire.auth.store import (
     OAuthCredential,
     auth_status_rows,
     get_claude_setup_token,
@@ -66,7 +66,7 @@ def test_auth_status_rows_defaults(tmp_path, monkeypatch):
 
 
 def test_auth_store_file_written(tmp_path):
-    store_path = Path(tmp_path) / ".crossfire" / "auth.json"
+    store_path = Path(tmp_path) / ".xfire" / "auth.json"
     store = load_auth_store(store_path)
     assert store.version == 1
 

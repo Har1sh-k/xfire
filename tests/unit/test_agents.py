@@ -5,8 +5,8 @@ import json
 
 import pytest
 
-from crossfire.agents.base import AgentError, BaseAgent
-from crossfire.config.settings import AgentConfig
+from xfire.agents.base import AgentError, BaseAgent
+from xfire.config.settings import AgentConfig
 
 
 class DummyAgent(BaseAgent):

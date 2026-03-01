@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from crossfire.config.settings import (
+from xfire.config.settings import (
     AgentConfig,
     ConfigError,
     CrossFireSettings,
@@ -51,7 +51,7 @@ class TestFindConfigFile:
         assert _find_config_file(str(tmp_path)) is None
 
     def test_finds_config_in_repo(self, tmp_path):
-        cfg_dir = tmp_path / ".crossfire"
+        cfg_dir = tmp_path / ".xfire"
         cfg_dir.mkdir()
         cfg_file = cfg_dir / "config.yaml"
         cfg_file.write_text("repo:\n  purpose: test\n")
@@ -128,7 +128,7 @@ class TestLoadSettings:
         assert settings.analysis.context_depth == "shallow"
 
     def test_config_file_merged(self, tmp_path):
-        cfg_dir = tmp_path / ".crossfire"
+        cfg_dir = tmp_path / ".xfire"
         cfg_dir.mkdir()
         cfg_file = cfg_dir / "config.yaml"
         cfg_file.write_text("repo:\n  purpose: test project\n")

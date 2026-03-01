@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from crossfire.integrations.github.pr_loader import (
+from xfire.integrations.github.pr_loader import (
     GitHubAPIError,
     _build_directory_structure,
     _fetch_all_pr_files,

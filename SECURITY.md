@@ -4,7 +4,7 @@
 
 **Do not open a public GitHub issue for security vulnerabilities.**
 
-Report security issues privately via GitHub's [private vulnerability reporting](https://github.com/Har1sh-k/CrossFire/security/advisories/new), or by emailing the maintainer directly (contact via GitHub profile).
+Report security issues privately via GitHub's [private vulnerability reporting](https://github.com/Har1sh-k/xfire/security/advisories/new), or by emailing the maintainer directly (contact via GitHub profile).
 
 Please include:
 
@@ -33,10 +33,10 @@ Security issues relevant to CrossFire include:
 
 CrossFire is designed to analyse potentially malicious code. It implements several protections:
 
-- **Prompt injection guards** — all external data (GitHub PR content, code files, agent outputs) is wrapped in tagged blocks before being included in prompts. See `crossfire/agents/prompts/guardrails.py`.
+- **Prompt injection guards** — all external data (GitHub PR content, code files, agent outputs) is wrapped in tagged blocks before being included in prompts. See `xfire/agents/prompts/guardrails.py`.
 - **Subprocess safety** — agent CLI calls use `asyncio.create_subprocess_exec()` with argument lists, never `shell=True`.
 - **No credential storage in output** — API keys are read from environment variables and never written to reports, logs, or cached files.
-- **Auth token isolation** — OAuth tokens stored in `.crossfire/auth.json` are excluded from version control via `.gitignore`.
+- **Auth token isolation** — OAuth tokens stored in `.xfire/auth.json` are excluded from version control via `.gitignore`.
 
 ---
 

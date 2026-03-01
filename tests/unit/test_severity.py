@@ -1,7 +1,7 @@
 """Tests for severity gating logic."""
 
-from crossfire.core.models import Finding, FindingCategory, FindingStatus, Severity
-from crossfire.core.severity import should_fail_ci
+from xfire.core.models import Finding, FindingCategory, FindingStatus, Severity
+from xfire.core.severity import should_fail_ci
 
 
 def _make_finding(

@@ -1,7 +1,7 @@
 """Tests for the policy engine — suppressions and waivers."""
 
-from crossfire.core.models import Finding, FindingCategory, FindingStatus, Severity
-from crossfire.core.policy_engine import PolicyEngine
+from xfire.core.models import Finding, FindingCategory, FindingStatus, Severity
+from xfire.core.policy_engine import PolicyEngine
 
 
 def _make_finding(

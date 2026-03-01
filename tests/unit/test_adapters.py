@@ -4,11 +4,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from crossfire.agents.base import AgentError
-from crossfire.agents.claude_adapter import ClaudeAgent
-from crossfire.agents.codex_adapter import CodexAgent
-from crossfire.agents.gemini_adapter import GeminiAgent
-from crossfire.config.settings import AgentConfig
+from xfire.agents.base import AgentError
+from xfire.agents.claude_adapter import ClaudeAgent
+from xfire.agents.codex_adapter import CodexAgent
+from xfire.agents.gemini_adapter import GeminiAgent
+from xfire.config.settings import AgentConfig
 
 
 class TestClaudeAdapter:

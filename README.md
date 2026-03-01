@@ -4,10 +4,10 @@
 
 ### _Multiple agents. One verdict. Zero blind spots._
 
-![PyPI - coming soon](https://img.shields.io/badge/pypi-coming%20soon-lightgrey)
+[![PyPI](https://img.shields.io/pypi/v/xfire)](https://pypi.org/project/xfire/)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
 [![License: GPL v3](https://img.shields.io/badge/license-GPLv3-blue)](LICENSE)
-[![CI](https://img.shields.io/github/actions/workflow/status/Har1sh-k/CrossFire/crossfire.yml?branch=main&label=CI)](https://github.com/Har1sh-k/CrossFire/actions)
+[![CI](https://img.shields.io/github/actions/workflow/status/Har1sh-k/xfire/crossfire.yml?branch=main&label=CI)](https://github.com/Har1sh-k/xfire/actions)
 [![Substack](https://img.shields.io/badge/substack-subscribe-orange?logo=substack)](https://substack.com/@har1shk)
 
 </div>
@@ -32,14 +32,14 @@ CrossFire is an AI-powered multi-agent security review tool. It runs three indep
 Requires Python 3.11+.
 
 ```bash
-pip install crossfire
+pip install xfire
 ```
 
 Or from source:
 
 ```bash
-git clone https://github.com/Har1sh-k/CrossFire
-cd CrossFire
+git clone https://github.com/Har1sh-k/xfire
+cd xfire
 pip install -e ".[dev]"
 ```
 
@@ -57,38 +57,38 @@ You need at least one agent CLI or API key:
 
 ```bash
 # Initialize config
-crossfire init
+xfire init
 
 # Verify agents are reachable
-crossfire test-llm
+xfire test-llm
 
 # Audit the whole repo
-crossfire code-review .
+xfire code-review .
 
 # Review a GitHub PR
-crossfire analyze-pr --repo owner/repo --pr 123 --github-token $GITHUB_TOKEN
+xfire analyze-pr --repo owner/repo --pr 123 --github-token $GITHUB_TOKEN
 
 # Baseline-aware delta scan
-crossfire scan . --since-last-scan
+xfire scan . --since-last-scan
 
 # Stream live debate chat as each agent responds
-crossfire code-review . --debate
+xfire code-review . --debate
 
 # Full debug trace + markdown log
-crossfire code-review . --debug
+xfire code-review . --debug
 
 # Play synthetic UI demo (no LLM calls — all 3 debate scenarios)
-crossfire demo --ui
+xfire demo --ui
 
 # Run one specific UI demo scenario
-crossfire demo --ui --scenario both_accept
+xfire demo --ui --scenario both_accept
 ```
 
 ---
 
 ## Configuration
 
-Run `crossfire init` to generate `.crossfire/config.yaml`. The key settings:
+Run `xfire init` to generate `.xfire/config.yaml`. The key settings:
 
 ```yaml
 agents:
@@ -120,17 +120,17 @@ Full config reference: [`docs/architecture.md`](docs/architecture.md)
   env:
     ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
   run: |
-    pip install crossfire
-    crossfire analyze-pr \
+    pip install xfire
+    xfire analyze-pr \
       --repo ${{ github.repository }} \
       --pr ${{ github.event.pull_request.number }} \
       --github-token ${{ secrets.GITHUB_TOKEN }} \
-      --format sarif --output crossfire.sarif --post-comment
+      --format sarif --output xfire.sarif --post-comment
 
 - name: Upload SARIF
   uses: github/codeql-action/upload-sarif@v3
   with:
-    sarif_file: crossfire.sarif
+    sarif_file: xfire.sarif
 ```
 
 ### Baseline-Aware Scan (recommended for main)
@@ -139,26 +139,26 @@ Full config reference: [`docs/architecture.md`](docs/architecture.md)
 - name: Restore CrossFire baseline
   uses: actions/cache@v4
   with:
-    path: .crossfire/baseline/
-    key: crossfire-baseline-${{ github.ref_name }}
+    path: .xfire/baseline/
+    key: xfire-baseline-${{ github.ref_name }}
 
 - name: CrossFire Baseline Scan
   env:
     ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
   run: |
-    pip install crossfire
-    crossfire scan . --since-last-scan --format sarif --output crossfire.sarif
+    pip install xfire
+    xfire scan . --since-last-scan --format sarif --output xfire.sarif
 
 - name: Upload SARIF
   uses: github/codeql-action/upload-sarif@v3
   with:
-    sarif_file: crossfire.sarif
+    sarif_file: xfire.sarif
 
 - name: Save CrossFire baseline
   uses: actions/cache/save@v4
   with:
-    path: .crossfire/baseline/
-    key: crossfire-baseline-${{ github.ref_name }}
+    path: .xfire/baseline/
+    key: xfire-baseline-${{ github.ref_name }}
 ```
 
 ---

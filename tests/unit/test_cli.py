@@ -6,7 +6,7 @@ import pytest
 import typer
 from typer.testing import CliRunner
 
-from crossfire.cli import (
+from xfire.cli import (
     _check_severity_gate,
     _default_config_yaml,
     _handle_error,
@@ -15,8 +15,8 @@ from crossfire.cli import (
     _preflight_check,
     app,
 )
-from crossfire.config.settings import CrossFireSettings, SeverityGateConfig, load_settings
-from crossfire.core.models import (
+from xfire.config.settings import CrossFireSettings, SeverityGateConfig, load_settings
+from xfire.core.models import (
     CrossFireReport,
     Finding,
     FindingCategory,
@@ -152,7 +152,7 @@ class TestPrintJudgeQuestions:
     def test_renders_without_error(self):
         from io import StringIO
         from rich.console import Console
-        from crossfire.cli_ui import HackerUI
+        from xfire.cli_ui import HackerUI
 
         buf = StringIO()
         console = Console(file=buf, highlight=False)
@@ -168,7 +168,7 @@ class TestPrintJudgeQuestions:
     def test_skips_empty_questions(self):
         from io import StringIO
         from rich.console import Console
-        from crossfire.cli_ui import HackerUI
+        from xfire.cli_ui import HackerUI
 
         buf = StringIO()
         console = Console(file=buf, highlight=False)
@@ -195,13 +195,13 @@ class TestCliInit:
         monkeypatch.chdir(tmp_path)
         result = runner.invoke(app, ["init"])
         assert result.exit_code == 0
-        config_file = tmp_path / ".crossfire" / "config.yaml"
+        config_file = tmp_path / ".xfire" / "config.yaml"
         assert config_file.exists()
         assert "agents:" in config_file.read_text()
 
     def test_existing_config_noop(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
-        config_dir = tmp_path / ".crossfire"
+        config_dir = tmp_path / ".xfire"
         config_dir.mkdir()
         (config_dir / "config.yaml").write_text("existing: true\n")
         result = runner.invoke(app, ["init"])
@@ -234,7 +234,7 @@ class TestAuthCommands:
             ["auth", "login", "--provider", "claude", "--token", "setup-token-value"],
         )
         assert result.exit_code == 0
-        auth_file = tmp_path / ".crossfire" / "auth.json"
+        auth_file = tmp_path / ".xfire" / "auth.json"
         assert auth_file.exists()
         assert "setup-token-value" in auth_file.read_text(encoding="utf-8")
 
@@ -248,7 +248,7 @@ class TestPreflightAuthStore:
     def test_api_preflight_accepts_auth_store(self, tmp_path, monkeypatch):
         import asyncio
 
-        from crossfire.auth.store import upsert_claude_setup_token
+        from xfire.auth.store import upsert_claude_setup_token
 
         monkeypatch.chdir(tmp_path)
         upsert_claude_setup_token("setup-token-value")

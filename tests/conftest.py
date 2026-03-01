@@ -4,8 +4,8 @@ import pathlib
 
 import pytest
 
-from crossfire.config.settings import AgentConfig, CrossFireSettings, DebateConfig
-from crossfire.core.models import (
+from xfire.config.settings import AgentConfig, CrossFireSettings, DebateConfig
+from xfire.core.models import (
     AgentReview,
     Finding,
     FindingCategory,

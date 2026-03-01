@@ -4,8 +4,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from crossfire.config.settings import AgentConfig, CrossFireSettings, SkillsConfig
-from crossfire.core.models import (
+from xfire.config.settings import AgentConfig, CrossFireSettings, SkillsConfig
+from xfire.core.models import (
     AgentReview,
     Finding,
     FindingCategory,
@@ -14,7 +14,7 @@ from crossfire.core.models import (
     PRContext,
     Severity,
 )
-from crossfire.core.orchestrator import CrossFireOrchestrator
+from xfire.core.orchestrator import CrossFireOrchestrator
 
 
 def _make_settings() -> CrossFireSettings:
@@ -206,7 +206,7 @@ class TestRunSkills:
         orch = CrossFireOrchestrator(settings)
         ctx = _make_context()
         with patch(
-            "crossfire.core.orchestrator.DataFlowTracingSkill"
+            "xfire.core.orchestrator.DataFlowTracingSkill"
         ) as MockSkill:
             MockSkill.return_value.execute.side_effect = RuntimeError("boom")
             result = orch._run_skills(ctx, IntentProfile(), str(tmp_path))

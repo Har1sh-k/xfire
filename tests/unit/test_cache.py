@@ -1,4 +1,4 @@
-"""Tests for crossfire.core.cache — context and intent persistence."""
+"""Tests for xfire.core.cache — context and intent persistence."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from crossfire.core.cache import (
+from xfire.core.cache import (
     context_cache_path,
     intent_cache_path,
     load_cached_context,
@@ -14,7 +14,7 @@ from crossfire.core.cache import (
     save_context_cache,
     save_intent_cache,
 )
-from crossfire.core.models import IntentProfile, PRContext
+from xfire.core.models import IntentProfile, PRContext
 
 
 @pytest.fixture

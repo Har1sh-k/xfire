@@ -1,6 +1,6 @@
 """Tests for core data models."""
 
-from crossfire.core.models import (
+from xfire.core.models import (
     AgentArgument,
     AgentReview,
     BlastRadius,

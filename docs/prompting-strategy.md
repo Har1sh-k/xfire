@@ -2,7 +2,7 @@
 
 ## Philosophy
 
-The review prompt is the product. Most of CrossFire's value comes from how we prompt the agents. The prompts in `crossfire/agents/prompts/` are the most important code in the repo.
+The review prompt is the product. Most of CrossFire's value comes from how we prompt the agents. The prompts in `xfire/agents/prompts/` are the most important code in the repo.
 
 ## Review Prompt (`review_prompt.py`)
 

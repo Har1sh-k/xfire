@@ -1,8 +1,8 @@
 """Tests for purpose-aware logic across the pipeline."""
 
-from crossfire.core.finding_synthesizer import FindingSynthesizer
-from crossfire.core.intent_inference import IntentInferrer
-from crossfire.core.models import (
+from xfire.core.finding_synthesizer import FindingSynthesizer
+from xfire.core.intent_inference import IntentInferrer
+from xfire.core.models import (
     AgentReview,
     DiffHunk,
     Evidence,

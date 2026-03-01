@@ -23,7 +23,7 @@ CrossFire has three pipelines.
 Audits the entire codebase as it currently stands. No diff, no PR, no commits.
 
 ```
-crossfire code-review .
+xfire code-review .
         |
         v
 +------------------------------+
@@ -85,7 +85,7 @@ crossfire code-review .
 Reviews a GitHub pull request — what changed and what security implications those changes introduce.
 
 ```
-crossfire analyze-pr --repo owner/repo --pr 123
+xfire analyze-pr --repo owner/repo --pr 123
         |
         v
 +------------------------------+
@@ -139,7 +139,7 @@ crossfire analyze-pr --repo owner/repo --pr 123
 ### Baseline-Aware Scan Pipeline
 
 ```
-crossfire scan . --base main --head feature
+xfire scan . --base main --head feature
         |
         v
 +------------------------------+
@@ -150,7 +150,7 @@ crossfire scan . --base main --head feature
               v
 +---------------------------------------------+
 |     BaselineManager                          |
-|     .crossfire/baseline/ exists?              |
+|     .xfire/baseline/ exists?              |
 |       NO  → IntentInferrer on whole repo      |  builds context.md + intent.json
 |       YES → FastModel intent-change check     |  if changed → rebuild baseline
 +-------------+-------------------------------+
@@ -218,49 +218,49 @@ crossfire scan . --base main --head feature
 
 | Component | File | Purpose (from code) | Status | Internal Dependencies |
 |-----------|------|---------------------|--------|-----------------------|
-| **CLI Entry Point** | `crossfire/cli.py` | Typer app with 12+ commands: `code-review`, `analyze-pr`, `analyze-diff`, `baseline`, `scan`, `report`, `init`, `config-check`, `demo`, `test-llm`, `auth login`, `auth status`, `debates`. `code-review` runs the whole-repo Code Review Pipeline. `baseline` builds `.crossfire/baseline/`. `scan` supports 6 input modes, auto-builds baseline, and prints delta summary. All pipeline commands accept `--debug` (live log + markdown file), `--silent` (suppress output), `--debate` (stream live debate chat as each agent responds), `--format`, `--output`. `test-llm` tests every configured agent with `AgentTestUI`. `debates` re-renders debate chat from saved JSON. `demo --ui` plays back three synthetic debate scenarios through the real `HackerUI` with no LLM calls (`tests/demo/scenarios.py`); `demo --fixture <name>` runs the real pipeline on a canned diff. | ✅ IMPLEMENTED | `config.settings`, `core.orchestrator`, `core.baseline`, `core.diff_resolver`, `agents.fast_model`, `core.models`, `core.severity`, `core.context_builder`, `output.*`, `integrations.github.comment_poster`, `cli_ui`, `auth.store` |
-| **Live UI** | `crossfire/cli_ui.py` | Terminal display layer. `HackerUI` — `rich.live.Live`-based display: braille phase spinner (`⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏`) at 10fps; rotating-circle agent icons (`◐◓◑◒`) at 6fps (visually distinct). `show_debate=True` streams live debate chat by intercepting `debate.argument`, `debate.judge_questions`, and `debate.verdict` structlog events above the Live area: `_print_debate_argument()` renders speech bubbles with severity badge `[HIGH]`/`[CRITICAL]` on the finding header; `_print_judge_questions()` renders a dim indented blockquote panel (not a speech bubble); `_print_debate_verdict()` renders a colored consensus panel. Optional `debug_mode` live-log ring buffer (last 8 events). structlog `processor()` raises `structlog.DropEvent()` to suppress stdout during pipeline. `AgentTestUI` — `transient=True` Live display for `test-llm`. Module-level `render_banner()` and `render_stats()`. | ✅ IMPLEMENTED | `rich.live`, `rich.text`, `rich.panel`, `rich.padding`, `structlog` |
-| **Debate Chat Renderer** | `crossfire/output/debate_view.py` | `render_debates(report, console)` renders all debates as a hacker-style terminal chat. Prosecution: left-aligned, red `rich.panel.Panel`. Defense: indented 6 spaces via `rich.padding.Padding`, cyan border. Judge: bright-white border, ⚖ icon. Consensus box: colored by outcome (confirmed=red, rejected=green, modified/inconclusive=yellow). Internal helpers (`_bubble()`, `_CONSENSUS_CONFIG`, `_SEVERITY_STYLE`, `_RESPONSE_INDENT`) are imported by `HackerUI` for live streaming. `render_debates()` itself is called only by `crossfire debates --input`. | ✅ IMPLEMENTED | `rich.console`, `rich.panel`, `rich.padding`, `rich.rule`, `rich.text` |
-| **Debug Log Writer** | `crossfire/output/debug_log.py` | `DebugCollector` — thread-safe structlog processor that buffers all pipeline log events in memory (time, level, event, extras). `write_debug_markdown(report, collector, command_info)` writes a timestamped markdown file (`crossfire-debug-YYYYMMDD-HHMMSS.md`) containing: pipeline events table, intent profile, context summary, full agent reviews with reasoning traces, debate transcripts, and the complete final report. Called by `--debug` flag on pipeline commands. | ✅ IMPLEMENTED | `threading`, `pathlib`, `output.markdown_report` |
-| **Auth Store** | `crossfire/auth/store.py` | `AuthStore` Pydantic model persisted at `.crossfire/auth.json`. Stores OAuth tokens and CLI credentials for Claude, Codex, and Gemini. CLI commands: `crossfire auth login --provider <name> [--token <val>]`, `crossfire auth status`. | ✅ IMPLEMENTED | `pydantic`, `pathlib` |
-| **Default Config** | `crossfire/config/defaults.py` | `DEFAULT_CONFIG` dict — nested default values for all settings, including `fast_model` section | ✅ IMPLEMENTED | _(none)_ |
-| **Settings Loader** | `crossfire/config/settings.py` | Loads config with priority: CLI > env > YAML > defaults. Pydantic models for each config section. Added `FastModelConfig` + `fast_model` field on `CrossFireSettings` | ✅ IMPLEMENTED | `config.defaults` |
-| **Core Models** | `crossfire/core/models.py` | 25+ Pydantic v2 models: `PRContext`, `Finding`, `DebateRecord`, `CrossFireReport`, enums, etc. | ✅ IMPLEMENTED | _(none — leaf module)_ |
-| **Context Builder** | `crossfire/core/context_builder.py` | Builds `PRContext` from 5 sources: (1) `build_from_repo()` — whole-repo walk for Code Review Pipeline, reads all source files up to `max_files`, no diff hunks; (2) GitHub PR via API; (3) local diff/patch; (4) staged changes; (5) git refs range. Shared helpers: diff parsing, file enrichment, imports, blame, test discovery. | ✅ IMPLEMENTED | `config.settings.AnalysisConfig`, `core.models`, `integrations.github.pr_loader` |
-| **Intent Inferrer** | `crossfire/core/intent_inference.py` | Heuristic-first intent inference with optional LLM enrichment. `IntentInferrer.infer(context)` runs the heuristic always. `infer_with_llm(context, agent, inferrer)` runs heuristic first, sends serialized result to LLM via `_format_heuristic_for_prompt()`, parses LLM `IntentProfile`, then merges via `_merge_profiles()`. Merge rules: scalars → LLM overrides if non-empty; lists → union with dedup; trust boundaries → merge by name; security controls → merge by `(type, location)`. On LLM failure: returns heuristic profile (already computed, zero wasted work). Call sites in `orchestrator.py` and `baseline.py` pass `inferrer` to enable enrichment. | ✅ IMPLEMENTED | `config.settings.RepoConfig`, `core.models` |
-| **Finding Synthesizer** | `crossfire/core/finding_synthesizer.py` | Union-find clustering, merges, dedupes findings from multiple agents. Cross-validation boost. Purpose-aware adjustments. Debate routing tags | ✅ IMPLEMENTED | `core.models` |
-| **Policy Engine** | `crossfire/core/policy_engine.py` | Applies suppression rules (category, file pattern, title pattern) to findings | ✅ IMPLEMENTED | `core.models` |
-| **Severity Gate** | `crossfire/core/severity.py` | `should_fail_ci()` — checks if findings breach severity/confidence threshold | ✅ IMPLEMENTED | `core.models` |
-| **Orchestrator** | `crossfire/core/orchestrator.py` | Four top-level entry points: `code_review()` — whole-repo audit using `build_from_repo()` + `CODE_REVIEW_SYSTEM_PROMPT`; `analyze_pr()` — GitHub PR via API; `analyze_diff()` — local diff/patch/staged; `scan_with_baseline()` — baseline-aware delta scan. Shared `_run_pipeline()`, `_run_skills()`, `_compute_overall_risk()`. `_build_scan_summary()` includes delta counts. | ✅ IMPLEMENTED | `agents.debate_engine`, `agents.review_engine`, `agents.prompts.review_prompt`, `agents.prompts.context_prompt`, `config.settings`, `core.baseline`, `core.context_builder`, `core.finding_synthesizer`, `core.intent_inference`, `core.models`, `core.policy_engine`, `skills.*` (all 6) |
-| **Baseline Manager** | `crossfire/core/baseline.py` | Reads/writes `.crossfire/baseline/`. `build()` runs `IntentInferrer` on whole repo, writes context.md + intent.json + scan_state.json + known_findings.json (PID lock prevents concurrent builds). `load()` deserializes all files. `check_intent_changed()` delegates to fast model. `update_after_scan()` persists confirmed findings. `filter_known()` splits new vs already-known. `_fingerprint()` = `sha256(category:file:title[:50])[:16]`. | ✅ IMPLEMENTED | `core.intent_inference`, `core.models`, `agents.fast_model`, `agents.prompts.context_prompt` |
-| **Diff Resolver** | `crossfire/core/diff_resolver.py` | Resolves all `crossfire scan` input modes into `DiffResult(diff_text, head_commit, base_commit, commit_range_desc)`. 6 static methods: `from_refs`, `from_range`, `from_patch`, `from_since_last_scan`, `from_since_date`, `from_last_n`. Uses `_run_git()` helper (same pattern as `context_builder.py`). | ✅ IMPLEMENTED | _(subprocess only)_ |
-| **Base Agent** | `crossfire/agents/base.py` | Abstract base with CLI + API dual-mode execution, JSON parsing, subprocess runner (with FileNotFoundError → AgentError conversion) | ✅ IMPLEMENTED | `config.settings.AgentConfig` |
-| **Claude Adapter** | `crossfire/agents/claude_adapter.py` | CLI: `claude -p "..." --output-format json --system-prompt "..."`. API: `anthropic.AsyncAnthropic.messages.create()` with timeout | ✅ IMPLEMENTED | `agents.base` |
-| **Codex Adapter** | `crossfire/agents/codex_adapter.py` | CLI: `codex -q "{system+user prompt}"`. API: `openai.AsyncOpenAI.chat.completions.create()` with timeout | ✅ IMPLEMENTED | `agents.base` |
-| **Gemini Adapter** | `crossfire/agents/gemini_adapter.py` | CLI: `gemini "{system+user prompt}"`. API: `google.generativeai.GenerativeModel.generate_content_async()` with `asyncio.wait_for` timeout | ✅ IMPLEMENTED | `agents.base` |
-| **Fast Model** | `crossfire/agents/fast_model.py` | Lightweight API-first, CLI-fallback model for cheap inference. `_call_api()` uses `anthropic.AsyncAnthropic` with `ANTHROPIC_API_KEY`. Falls back to `_call_cli()` (subprocess) if key missing. Used for intent-change detection and context-aware prompt generation. Raises `FastModelUnavailable` if both paths fail. | ✅ IMPLEMENTED | `config.settings.FastModelConfig` |
-| **Context Prompt** | `crossfire/agents/prompts/context_prompt.py` | `check_intent_changed()` — fast model checks if diff changes security model (returns bool). `build_context_system_prompt()` — adapts `AUDIT_TEMPLATE` to repo context using fast model. Both fall back gracefully on `FastModelUnavailable`. | ✅ IMPLEMENTED | `agents.fast_model`, `core.baseline`, `agents.prompts.review_prompt` |
-| **Review Engine** | `crossfire/agents/review_engine.py` | Dispatches review prompt to all enabled agents in parallel (`asyncio.gather`), parses structured JSON responses into `AgentReview` with case-insensitive enum parsing via `_parse_enum_flexible()`. Added optional `system_prompt` param — if provided, overrides `REVIEW_SYSTEM_PROMPT`; backward compatible (None → default). | ✅ IMPLEMENTED | `agents.base`, `agents.claude_adapter`, `agents.codex_adapter`, `agents.gemini_adapter`, `agents.prompts.review_prompt`, `config.settings`, `core.models` |
-| **Debate Engine** | `crossfire/agents/debate_engine.py` | 2-round judge-led debate: Round 1 prosecution/defense, optional Round 2 judge-led clarification (if defense disagrees). Evidence-driven role assignment | ✅ IMPLEMENTED | `agents.base`, `agents.claude_adapter`, `agents.codex_adapter`, `agents.gemini_adapter`, `agents.consensus`, `agents.prompts.prosecutor_prompt`, `agents.prompts.defense_prompt`, `agents.prompts.judge_prompt`, `config.settings`, `core.models` |
-| **Consensus Logic** | `crossfire/agents/consensus.py` | Evidence-quality-based verdict: judge position + cross-checks + purpose-aware override + minimum evidence thresholds | ✅ IMPLEMENTED | `core.models` |
-| **Review Prompt** | `crossfire/agents/prompts/review_prompt.py` | Two system prompts + two user prompt builders: `REVIEW_SYSTEM_PROMPT` + `build_review_prompt()` for PR/diff review (diff-focused); `CODE_REVIEW_SYSTEM_PROMPT` + `build_code_review_prompt()` for whole-repo audit (full-file, no diff section, "audit the codebase" framing). Both protected by `inject_guard_preamble()`. | ✅ IMPLEMENTED | `core.models`, `agents.prompts.guardrails` |
-| **Prosecutor Prompt** | `crossfire/agents/prompts/prosecutor_prompt.py` | System prompt + `build_prosecutor_prompt()` | ✅ IMPLEMENTED | _(none)_ |
-| **Defense Prompt** | `crossfire/agents/prompts/defense_prompt.py` | System prompt + `build_defense_prompt()` | ✅ IMPLEMENTED | _(none)_ |
-| **Judge Prompt** | `crossfire/agents/prompts/judge_prompt.py` | System prompt + `build_judge_prompt()` | ✅ IMPLEMENTED | _(none)_ |
-| **Skill Base** | `crossfire/skills/base.py` | `BaseSkill` ABC + `SkillResult` model | ✅ IMPLEMENTED | _(none)_ |
-| **Data Flow Tracing** | `crossfire/skills/data_flow_tracing.py` | Regex-based source→sink detection for Python/JS/TS. Same-file variable sharing heuristic | ✅ IMPLEMENTED | `skills.base` |
-| **Git Archeology** | `crossfire/skills/git_archeology.py` | Git blame, file history, security commit search, code age, contributors | ✅ IMPLEMENTED | `skills.base` |
-| **Config Analysis** | `crossfire/skills/config_analysis.py` | CI workflow risk patterns, Docker risk patterns, security config summary | ✅ IMPLEMENTED | `skills.base` |
-| **Dependency Analysis** | `crossfire/skills/dependency_analysis.py` | Manifest diff (requirements.txt, package.json, pyproject.toml), risky package detection | ✅ IMPLEMENTED | `skills.base` |
-| **Test Coverage Check** | `crossfire/skills/test_coverage_check.py` | Test file discovery, per-function test existence check, coverage gap summary | ✅ IMPLEMENTED | `skills.base` |
-| **Code Navigation** | `crossfire/skills/code_navigation.py` | Import tracing, caller discovery via `git grep`, symbol definition search | ✅ IMPLEMENTED | `skills.base` |
-| **Markdown Report** | `crossfire/output/markdown_report.py` | Generates markdown report: summary table, findings by status, debate logs, purpose assessments | ✅ IMPLEMENTED | `core.models` |
-| **JSON Report** | `crossfire/output/json_report.py` | `report.model_dump_json(indent=2)` — direct Pydantic serialization | ✅ IMPLEMENTED | `core.models` |
-| **SARIF Report** | `crossfire/output/sarif_report.py` | SARIF v2.1.0 with rules (help text), results (partialFingerprints, rank, code snippets, relatedLocations), run properties. Filters rejected findings | ✅ IMPLEMENTED | `core.models` |
-| **Debate Chat Renderer** | `crossfire/output/debate_view.py` | See entry above in CLI/UI section | ✅ IMPLEMENTED | `rich.*` |
-| **Debug Log Writer** | `crossfire/output/debug_log.py` | See entry above in CLI/UI section | ✅ IMPLEMENTED | `output.markdown_report` |
-| **PR Loader** | `crossfire/integrations/github/pr_loader.py` | Async httpx client: fetches PR metadata, diff, file contents (head+base in parallel), README, repo info, commits, manifest files. Populates `config_files`, `ci_config_files`, `directory_structure` | ✅ IMPLEMENTED | `config.settings.AnalysisConfig`, `core.models`, `core.context_builder.parse_diff` |
-| **Comment Poster** | `crossfire/integrations/github/comment_poster.py` | Posts/updates review comment on GitHub PR via Issues API | ✅ IMPLEMENTED | _(none — uses httpx directly)_ |
+| **CLI Entry Point** | `xfire/cli.py` | Typer app with 12+ commands: `code-review`, `analyze-pr`, `analyze-diff`, `baseline`, `scan`, `report`, `init`, `config-check`, `demo`, `test-llm`, `auth login`, `auth status`, `debates`. `code-review` runs the whole-repo Code Review Pipeline. `baseline` builds `.xfire/baseline/`. `scan` supports 6 input modes, auto-builds baseline, and prints delta summary. All pipeline commands accept `--debug` (live log + markdown file), `--silent` (suppress output), `--debate` (stream live debate chat as each agent responds), `--format`, `--output`. `test-llm` tests every configured agent with `AgentTestUI`. `debates` re-renders debate chat from saved JSON. `demo --ui` plays back three synthetic debate scenarios through the real `HackerUI` with no LLM calls (`tests/demo/scenarios.py`); `demo --fixture <name>` runs the real pipeline on a canned diff. | ✅ IMPLEMENTED | `config.settings`, `core.orchestrator`, `core.baseline`, `core.diff_resolver`, `agents.fast_model`, `core.models`, `core.severity`, `core.context_builder`, `output.*`, `integrations.github.comment_poster`, `cli_ui`, `auth.store` |
+| **Live UI** | `xfire/cli_ui.py` | Terminal display layer. `HackerUI` — `rich.live.Live`-based display: braille phase spinner (`⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏`) at 10fps; rotating-circle agent icons (`◐◓◑◒`) at 6fps (visually distinct). `show_debate=True` streams live debate chat by intercepting `debate.argument`, `debate.judge_questions`, and `debate.verdict` structlog events above the Live area: `_print_debate_argument()` renders speech bubbles with severity badge `[HIGH]`/`[CRITICAL]` on the finding header; `_print_judge_questions()` renders a dim indented blockquote panel (not a speech bubble); `_print_debate_verdict()` renders a colored consensus panel. Optional `debug_mode` live-log ring buffer (last 8 events). structlog `processor()` raises `structlog.DropEvent()` to suppress stdout during pipeline. `AgentTestUI` — `transient=True` Live display for `test-llm`. Module-level `render_banner()` and `render_stats()`. | ✅ IMPLEMENTED | `rich.live`, `rich.text`, `rich.panel`, `rich.padding`, `structlog` |
+| **Debate Chat Renderer** | `xfire/output/debate_view.py` | `render_debates(report, console)` renders all debates as a hacker-style terminal chat. Prosecution: left-aligned, red `rich.panel.Panel`. Defense: indented 6 spaces via `rich.padding.Padding`, cyan border. Judge: bright-white border, ⚖ icon. Consensus box: colored by outcome (confirmed=red, rejected=green, modified/inconclusive=yellow). Internal helpers (`_bubble()`, `_CONSENSUS_CONFIG`, `_SEVERITY_STYLE`, `_RESPONSE_INDENT`) are imported by `HackerUI` for live streaming. `render_debates()` itself is called only by `xfire debates --input`. | ✅ IMPLEMENTED | `rich.console`, `rich.panel`, `rich.padding`, `rich.rule`, `rich.text` |
+| **Debug Log Writer** | `xfire/output/debug_log.py` | `DebugCollector` — thread-safe structlog processor that buffers all pipeline log events in memory (time, level, event, extras). `write_debug_markdown(report, collector, command_info)` writes a timestamped markdown file (`xfire-debug-YYYYMMDD-HHMMSS.md`) containing: pipeline events table, intent profile, context summary, full agent reviews with reasoning traces, debate transcripts, and the complete final report. Called by `--debug` flag on pipeline commands. | ✅ IMPLEMENTED | `threading`, `pathlib`, `output.markdown_report` |
+| **Auth Store** | `xfire/auth/store.py` | `AuthStore` Pydantic model persisted at `.xfire/auth.json`. Stores OAuth tokens and CLI credentials for Claude, Codex, and Gemini. CLI commands: `xfire auth login --provider <name> [--token <val>]`, `xfire auth status`. | ✅ IMPLEMENTED | `pydantic`, `pathlib` |
+| **Default Config** | `xfire/config/defaults.py` | `DEFAULT_CONFIG` dict — nested default values for all settings, including `fast_model` section | ✅ IMPLEMENTED | _(none)_ |
+| **Settings Loader** | `xfire/config/settings.py` | Loads config with priority: CLI > env > YAML > defaults. Pydantic models for each config section. Added `FastModelConfig` + `fast_model` field on `CrossFireSettings` | ✅ IMPLEMENTED | `config.defaults` |
+| **Core Models** | `xfire/core/models.py` | 25+ Pydantic v2 models: `PRContext`, `Finding`, `DebateRecord`, `CrossFireReport`, enums, etc. | ✅ IMPLEMENTED | _(none — leaf module)_ |
+| **Context Builder** | `xfire/core/context_builder.py` | Builds `PRContext` from 5 sources: (1) `build_from_repo()` — whole-repo walk for Code Review Pipeline, reads all source files up to `max_files`, no diff hunks; (2) GitHub PR via API; (3) local diff/patch; (4) staged changes; (5) git refs range. Shared helpers: diff parsing, file enrichment, imports, blame, test discovery. | ✅ IMPLEMENTED | `config.settings.AnalysisConfig`, `core.models`, `integrations.github.pr_loader` |
+| **Intent Inferrer** | `xfire/core/intent_inference.py` | Heuristic-first intent inference with optional LLM enrichment. `IntentInferrer.infer(context)` runs the heuristic always. `infer_with_llm(context, agent, inferrer)` runs heuristic first, sends serialized result to LLM via `_format_heuristic_for_prompt()`, parses LLM `IntentProfile`, then merges via `_merge_profiles()`. Merge rules: scalars → LLM overrides if non-empty; lists → union with dedup; trust boundaries → merge by name; security controls → merge by `(type, location)`. On LLM failure: returns heuristic profile (already computed, zero wasted work). Call sites in `orchestrator.py` and `baseline.py` pass `inferrer` to enable enrichment. | ✅ IMPLEMENTED | `config.settings.RepoConfig`, `core.models` |
+| **Finding Synthesizer** | `xfire/core/finding_synthesizer.py` | Union-find clustering, merges, dedupes findings from multiple agents. Cross-validation boost. Purpose-aware adjustments. Debate routing tags | ✅ IMPLEMENTED | `core.models` |
+| **Policy Engine** | `xfire/core/policy_engine.py` | Applies suppression rules (category, file pattern, title pattern) to findings | ✅ IMPLEMENTED | `core.models` |
+| **Severity Gate** | `xfire/core/severity.py` | `should_fail_ci()` — checks if findings breach severity/confidence threshold | ✅ IMPLEMENTED | `core.models` |
+| **Orchestrator** | `xfire/core/orchestrator.py` | Four top-level entry points: `code_review()` — whole-repo audit using `build_from_repo()` + `CODE_REVIEW_SYSTEM_PROMPT`; `analyze_pr()` — GitHub PR via API; `analyze_diff()` — local diff/patch/staged; `scan_with_baseline()` — baseline-aware delta scan. Shared `_run_pipeline()`, `_run_skills()`, `_compute_overall_risk()`. `_build_scan_summary()` includes delta counts. | ✅ IMPLEMENTED | `agents.debate_engine`, `agents.review_engine`, `agents.prompts.review_prompt`, `agents.prompts.context_prompt`, `config.settings`, `core.baseline`, `core.context_builder`, `core.finding_synthesizer`, `core.intent_inference`, `core.models`, `core.policy_engine`, `skills.*` (all 6) |
+| **Baseline Manager** | `xfire/core/baseline.py` | Reads/writes `.xfire/baseline/`. `build()` runs `IntentInferrer` on whole repo, writes context.md + intent.json + scan_state.json + known_findings.json (PID lock prevents concurrent builds). `load()` deserializes all files. `check_intent_changed()` delegates to fast model. `update_after_scan()` persists confirmed findings. `filter_known()` splits new vs already-known. `_fingerprint()` = `sha256(category:file:title[:50])[:16]`. | ✅ IMPLEMENTED | `core.intent_inference`, `core.models`, `agents.fast_model`, `agents.prompts.context_prompt` |
+| **Diff Resolver** | `xfire/core/diff_resolver.py` | Resolves all `xfire scan` input modes into `DiffResult(diff_text, head_commit, base_commit, commit_range_desc)`. 6 static methods: `from_refs`, `from_range`, `from_patch`, `from_since_last_scan`, `from_since_date`, `from_last_n`. Uses `_run_git()` helper (same pattern as `context_builder.py`). | ✅ IMPLEMENTED | _(subprocess only)_ |
+| **Base Agent** | `xfire/agents/base.py` | Abstract base with CLI + API dual-mode execution, JSON parsing, subprocess runner (with FileNotFoundError → AgentError conversion) | ✅ IMPLEMENTED | `config.settings.AgentConfig` |
+| **Claude Adapter** | `xfire/agents/claude_adapter.py` | CLI: `claude -p "..." --output-format json --system-prompt "..."`. API: `anthropic.AsyncAnthropic.messages.create()` with timeout | ✅ IMPLEMENTED | `agents.base` |
+| **Codex Adapter** | `xfire/agents/codex_adapter.py` | CLI: `codex -q "{system+user prompt}"`. API: `openai.AsyncOpenAI.chat.completions.create()` with timeout | ✅ IMPLEMENTED | `agents.base` |
+| **Gemini Adapter** | `xfire/agents/gemini_adapter.py` | CLI: `gemini "{system+user prompt}"`. API: `google.generativeai.GenerativeModel.generate_content_async()` with `asyncio.wait_for` timeout | ✅ IMPLEMENTED | `agents.base` |
+| **Fast Model** | `xfire/agents/fast_model.py` | Lightweight API-first, CLI-fallback model for cheap inference. `_call_api()` uses `anthropic.AsyncAnthropic` with `ANTHROPIC_API_KEY`. Falls back to `_call_cli()` (subprocess) if key missing. Used for intent-change detection and context-aware prompt generation. Raises `FastModelUnavailable` if both paths fail. | ✅ IMPLEMENTED | `config.settings.FastModelConfig` |
+| **Context Prompt** | `xfire/agents/prompts/context_prompt.py` | `check_intent_changed()` — fast model checks if diff changes security model (returns bool). `build_context_system_prompt()` — adapts `AUDIT_TEMPLATE` to repo context using fast model. Both fall back gracefully on `FastModelUnavailable`. | ✅ IMPLEMENTED | `agents.fast_model`, `core.baseline`, `agents.prompts.review_prompt` |
+| **Review Engine** | `xfire/agents/review_engine.py` | Dispatches review prompt to all enabled agents in parallel (`asyncio.gather`), parses structured JSON responses into `AgentReview` with case-insensitive enum parsing via `_parse_enum_flexible()`. Added optional `system_prompt` param — if provided, overrides `REVIEW_SYSTEM_PROMPT`; backward compatible (None → default). | ✅ IMPLEMENTED | `agents.base`, `agents.claude_adapter`, `agents.codex_adapter`, `agents.gemini_adapter`, `agents.prompts.review_prompt`, `config.settings`, `core.models` |
+| **Debate Engine** | `xfire/agents/debate_engine.py` | 2-round judge-led debate: Round 1 prosecution/defense, optional Round 2 judge-led clarification (if defense disagrees). Evidence-driven role assignment | ✅ IMPLEMENTED | `agents.base`, `agents.claude_adapter`, `agents.codex_adapter`, `agents.gemini_adapter`, `agents.consensus`, `agents.prompts.prosecutor_prompt`, `agents.prompts.defense_prompt`, `agents.prompts.judge_prompt`, `config.settings`, `core.models` |
+| **Consensus Logic** | `xfire/agents/consensus.py` | Evidence-quality-based verdict: judge position + cross-checks + purpose-aware override + minimum evidence thresholds | ✅ IMPLEMENTED | `core.models` |
+| **Review Prompt** | `xfire/agents/prompts/review_prompt.py` | Two system prompts + two user prompt builders: `REVIEW_SYSTEM_PROMPT` + `build_review_prompt()` for PR/diff review (diff-focused); `CODE_REVIEW_SYSTEM_PROMPT` + `build_code_review_prompt()` for whole-repo audit (full-file, no diff section, "audit the codebase" framing). Both protected by `inject_guard_preamble()`. | ✅ IMPLEMENTED | `core.models`, `agents.prompts.guardrails` |
+| **Prosecutor Prompt** | `xfire/agents/prompts/prosecutor_prompt.py` | System prompt + `build_prosecutor_prompt()` | ✅ IMPLEMENTED | _(none)_ |
+| **Defense Prompt** | `xfire/agents/prompts/defense_prompt.py` | System prompt + `build_defense_prompt()` | ✅ IMPLEMENTED | _(none)_ |
+| **Judge Prompt** | `xfire/agents/prompts/judge_prompt.py` | System prompt + `build_judge_prompt()` | ✅ IMPLEMENTED | _(none)_ |
+| **Skill Base** | `xfire/skills/base.py` | `BaseSkill` ABC + `SkillResult` model | ✅ IMPLEMENTED | _(none)_ |
+| **Data Flow Tracing** | `xfire/skills/data_flow_tracing.py` | Regex-based source→sink detection for Python/JS/TS. Same-file variable sharing heuristic | ✅ IMPLEMENTED | `skills.base` |
+| **Git Archeology** | `xfire/skills/git_archeology.py` | Git blame, file history, security commit search, code age, contributors | ✅ IMPLEMENTED | `skills.base` |
+| **Config Analysis** | `xfire/skills/config_analysis.py` | CI workflow risk patterns, Docker risk patterns, security config summary | ✅ IMPLEMENTED | `skills.base` |
+| **Dependency Analysis** | `xfire/skills/dependency_analysis.py` | Manifest diff (requirements.txt, package.json, pyproject.toml), risky package detection | ✅ IMPLEMENTED | `skills.base` |
+| **Test Coverage Check** | `xfire/skills/test_coverage_check.py` | Test file discovery, per-function test existence check, coverage gap summary | ✅ IMPLEMENTED | `skills.base` |
+| **Code Navigation** | `xfire/skills/code_navigation.py` | Import tracing, caller discovery via `git grep`, symbol definition search | ✅ IMPLEMENTED | `skills.base` |
+| **Markdown Report** | `xfire/output/markdown_report.py` | Generates markdown report: summary table, findings by status, debate logs, purpose assessments | ✅ IMPLEMENTED | `core.models` |
+| **JSON Report** | `xfire/output/json_report.py` | `report.model_dump_json(indent=2)` — direct Pydantic serialization | ✅ IMPLEMENTED | `core.models` |
+| **SARIF Report** | `xfire/output/sarif_report.py` | SARIF v2.1.0 with rules (help text), results (partialFingerprints, rank, code snippets, relatedLocations), run properties. Filters rejected findings | ✅ IMPLEMENTED | `core.models` |
+| **Debate Chat Renderer** | `xfire/output/debate_view.py` | See entry above in CLI/UI section | ✅ IMPLEMENTED | `rich.*` |
+| **Debug Log Writer** | `xfire/output/debug_log.py` | See entry above in CLI/UI section | ✅ IMPLEMENTED | `output.markdown_report` |
+| **PR Loader** | `xfire/integrations/github/pr_loader.py` | Async httpx client: fetches PR metadata, diff, file contents (head+base in parallel), README, repo info, commits, manifest files. Populates `config_files`, `ci_config_files`, `directory_structure` | ✅ IMPLEMENTED | `config.settings.AnalysisConfig`, `core.models`, `core.context_builder.parse_diff` |
+| **Comment Poster** | `xfire/integrations/github/comment_poster.py` | Posts/updates review comment on GitHub PR via Issues API | ✅ IMPLEMENTED | _(none — uses httpx directly)_ |
 
 ### Status Legend
 - ✅ **IMPLEMENTED** — Code is present, connected, and functional
@@ -293,7 +293,7 @@ flowchart TD
     end
 
     subgraph AUTH["Auth Layer"]
-        AUTH_STORE["auth/store.py<br/>AuthStore (.crossfire/auth.json)"]
+        AUTH_STORE["auth/store.py<br/>AuthStore (.xfire/auth.json)"]
     end
 
     subgraph CONFIG["Config Layer"]
@@ -757,7 +757,7 @@ classDiagram
 
 ## 4. Call Graph — Entry Point Traces
 
-### COMMAND: `crossfire analyze-pr --repo owner/repo --pr 123 --github-token XXX`
+### COMMAND: `xfire analyze-pr --repo owner/repo --pr 123 --github-token XXX`
 
 ```
 cli.py:45 analyze_pr(repo: str, pr: int, github_token: str, agents: str|None,
@@ -886,7 +886,7 @@ cli.py:45 analyze_pr(repo: str, pr: int, github_token: str, agents: str|None,
       └─ typer.Exit(1) if breached
 ```
 
-### COMMAND: `crossfire analyze-diff --patch changes.patch --repo-dir /path/to/repo`
+### COMMAND: `xfire analyze-diff --patch changes.patch --repo-dir /path/to/repo`
 
 ```
 cli.py:119 analyze_diff(patch: str, repo_dir: str, staged: bool, base: str|None,
@@ -922,7 +922,7 @@ cli.py:119 analyze_diff(patch: str, repo_dir: str, staged: bool, base: str|None,
 └─ _check_severity_gate(report, settings)
 ```
 
-### COMMAND: `crossfire report --input results.json --format sarif`
+### COMMAND: `xfire report --input results.json --format sarif`
 
 ```
 cli.py:196 report(input: str, format: str, output: str|None)
@@ -934,19 +934,19 @@ cli.py:196 report(input: str, format: str, output: str|None)
    └─ generate_sarif_report(report) → SARIF JSON string
 ```
 
-### COMMAND: `crossfire init`
+### COMMAND: `xfire init`
 
 ```
 cli.py:222 init()
 │
-├─ Path.cwd() / ".crossfire" → config_dir
+├─ Path.cwd() / ".xfire" → config_dir
 ├─ config_dir.mkdir(exist_ok=True)
-├─ If .crossfire/config.yaml exists → exit
-├─ If .crossfire/config.example.yaml exists at __file__/../../ → shutil.copy
+├─ If .xfire/config.yaml exists → exit
+├─ If .xfire/config.example.yaml exists at __file__/../../ → shutil.copy
 └─ Else → config_file.write_text(_default_config_yaml())
 ```
 
-### COMMAND: `crossfire config-check --repo-dir /path`
+### COMMAND: `xfire config-check --repo-dir /path`
 
 ```
 cli.py:243 config_check(repo_dir: str)
@@ -955,7 +955,7 @@ cli.py:243 config_check(repo_dir: str)
 └─ Print agents, context_depth, debate config, severity_gate
 ```
 
-### COMMAND: `crossfire demo`
+### COMMAND: `xfire demo`
 
 Two modes — `--ui` (synthetic, no LLM calls) or `--fixture` (real pipeline):
 
@@ -963,7 +963,7 @@ Two modes — `--ui` (synthetic, no LLM calls) or `--fixture` (real pipeline):
 cli.py demo(fixture, ui, scenario, format, verbose)
 │
 ├─ [--ui / --scenario]  ── UI demo mode (no LLM calls)
-│   ├─ from crossfire.demo.scenarios import SCENARIOS
+│   ├─ from xfire.demo.scenarios import SCENARIOS
 │   ├─ targets = [scenario] or all 3 keys
 │   └─ asyncio.run(_run_all())
 │       └─ for each scenario fn(console):
@@ -997,66 +997,66 @@ cli.py demo(fixture, ui, scenario, format, verbose)
 
 ```
 LAYER 0 — Leaf modules (no internal deps):
-  ├─ crossfire/core/models.py
-  ├─ crossfire/config/defaults.py
-  ├─ crossfire/skills/base.py
-  ├─ crossfire/agents/prompts/prosecutor_prompt.py
-  ├─ crossfire/agents/prompts/defense_prompt.py
-  └─ crossfire/agents/prompts/judge_prompt.py
+  ├─ xfire/core/models.py
+  ├─ xfire/config/defaults.py
+  ├─ xfire/skills/base.py
+  ├─ xfire/agents/prompts/prosecutor_prompt.py
+  ├─ xfire/agents/prompts/defense_prompt.py
+  └─ xfire/agents/prompts/judge_prompt.py
 
 LAYER 1 — Depends only on Layer 0:
-  ├─ crossfire/config/settings.py → config/defaults.py
-  ├─ crossfire/core/policy_engine.py → core/models.py
-  ├─ crossfire/core/severity.py → core/models.py
-  ├─ crossfire/output/json_report.py → core/models.py
-  ├─ crossfire/output/markdown_report.py → core/models.py
-  ├─ crossfire/output/sarif_report.py → core/models.py
-  ├─ crossfire/agents/consensus.py → core/models.py
-  └─ crossfire/integrations/github/comment_poster.py → (none internal)
+  ├─ xfire/config/settings.py → config/defaults.py
+  ├─ xfire/core/policy_engine.py → core/models.py
+  ├─ xfire/core/severity.py → core/models.py
+  ├─ xfire/output/json_report.py → core/models.py
+  ├─ xfire/output/markdown_report.py → core/models.py
+  ├─ xfire/output/sarif_report.py → core/models.py
+  ├─ xfire/agents/consensus.py → core/models.py
+  └─ xfire/integrations/github/comment_poster.py → (none internal)
 
 LAYER 2 — Depends on Layer 0-1:
-  ├─ crossfire/agents/base.py → config/settings.py (AgentConfig)
-  ├─ crossfire/core/intent_inference.py → config/settings.py (RepoConfig), core/models.py
-  ├─ crossfire/agents/prompts/review_prompt.py → core/models.py
-  ├─ crossfire/skills/data_flow_tracing.py → skills/base.py
-  ├─ crossfire/skills/git_archeology.py → skills/base.py
-  ├─ crossfire/skills/config_analysis.py → skills/base.py
-  ├─ crossfire/skills/dependency_analysis.py → skills/base.py
-  ├─ crossfire/skills/test_coverage_check.py → skills/base.py
-  └─ crossfire/skills/code_navigation.py → skills/base.py
+  ├─ xfire/agents/base.py → config/settings.py (AgentConfig)
+  ├─ xfire/core/intent_inference.py → config/settings.py (RepoConfig), core/models.py
+  ├─ xfire/agents/prompts/review_prompt.py → core/models.py
+  ├─ xfire/skills/data_flow_tracing.py → skills/base.py
+  ├─ xfire/skills/git_archeology.py → skills/base.py
+  ├─ xfire/skills/config_analysis.py → skills/base.py
+  ├─ xfire/skills/dependency_analysis.py → skills/base.py
+  ├─ xfire/skills/test_coverage_check.py → skills/base.py
+  └─ xfire/skills/code_navigation.py → skills/base.py
 
 LAYER 3 — Depends on Layer 0-2:
-  ├─ crossfire/agents/claude_adapter.py → agents/base.py
-  ├─ crossfire/agents/codex_adapter.py → agents/base.py
-  ├─ crossfire/agents/gemini_adapter.py → agents/base.py
-  └─ crossfire/core/context_builder.py → config/settings.py (AnalysisConfig), core/models.py
+  ├─ xfire/agents/claude_adapter.py → agents/base.py
+  ├─ xfire/agents/codex_adapter.py → agents/base.py
+  ├─ xfire/agents/gemini_adapter.py → agents/base.py
+  └─ xfire/core/context_builder.py → config/settings.py (AnalysisConfig), core/models.py
       └─ Lazy import: integrations/github/pr_loader.py [Layer 3b]
 
 LAYER 3b — Depends on Layer 0-3:
-  └─ crossfire/integrations/github/pr_loader.py → config/settings.py (AnalysisConfig),
+  └─ xfire/integrations/github/pr_loader.py → config/settings.py (AnalysisConfig),
                                                     core/models.py, core/context_builder.parse_diff
 
 LAYER 4 — Depends on Layer 0-3:
-  ├─ crossfire/agents/review_engine.py → agents/base.py, agents/claude_adapter.py,
+  ├─ xfire/agents/review_engine.py → agents/base.py, agents/claude_adapter.py,
   │                                       agents/codex_adapter.py, agents/gemini_adapter.py,
   │                                       agents/prompts/review_prompt.py, config/settings.py,
   │                                       core/models.py
-  ├─ crossfire/agents/debate_engine.py → agents/base.py, agents/claude_adapter.py,
+  ├─ xfire/agents/debate_engine.py → agents/base.py, agents/claude_adapter.py,
   │                                       agents/codex_adapter.py, agents/gemini_adapter.py,
   │                                       agents/consensus.py, agents/prompts/prosecutor_prompt.py,
   │                                       agents/prompts/defense_prompt.py, agents/prompts/judge_prompt.py,
   │                                       config/settings.py, core/models.py
-  └─ crossfire/core/finding_synthesizer.py → core/models.py
+  └─ xfire/core/finding_synthesizer.py → core/models.py
 
 LAYER 5 — Orchestration (depends on Layer 0-4):
-  └─ crossfire/core/orchestrator.py → agents/debate_engine.py, agents/review_engine.py,
+  └─ xfire/core/orchestrator.py → agents/debate_engine.py, agents/review_engine.py,
                                        config/settings.py, core/context_builder.py,
                                        core/finding_synthesizer.py, core/intent_inference.py,
                                        core/models.py, core/policy_engine.py,
                                        skills/* (all 6)
 
 LAYER 6 — Entry point (depends on Layer 0-5):
-  └─ crossfire/cli.py → config/settings.py, core/orchestrator.py, core/models.py,
+  └─ xfire/cli.py → config/settings.py, core/orchestrator.py, core/models.py,
                           core/context_builder.py (parse_diff only in demo),
                           core/severity.py, output/* (all 3),
                           integrations/github/comment_poster.py
@@ -1323,8 +1323,8 @@ All previously identified sync-in-async issues have been resolved:
 Source Priority (highest wins):
   1. CLI flags (--context-depth, --agents, --skip-debate, etc.)
   2. Environment: CROSSFIRE_CONFIG_PATH, GITHUB_TOKEN, API key env vars
-  3. .crossfire/config.yaml (in repo root or CROSSFIRE_CONFIG_PATH)
-  4. crossfire/config/defaults.py DEFAULT_CONFIG
+  3. .xfire/config.yaml (in repo root or CROSSFIRE_CONFIG_PATH)
+  4. xfire/config/defaults.py DEFAULT_CONFIG
 
 Loading:
   load_settings(repo_dir, cli_overrides)
@@ -1344,7 +1344,7 @@ Loading:
 |-----------|-------------------|---------------------|
 | `CrossFireOrchestrator` | Constructor: `settings: CrossFireSettings` | `settings.analysis`, `settings.repo`, `settings.agents`, `settings.debate`, `settings.skills`, `settings.suppressions` |
 | `FastModel` | Constructor: `config: FastModelConfig` | `provider`, `model`, `api_key_env`, `cli_command`, `cli_args`, `timeout` |
-| `BaselineManager` | Constructor: `repo_dir: str` | _(reads/writes `.crossfire/baseline/` directly)_ |
+| `BaselineManager` | Constructor: `repo_dir: str` | _(reads/writes `.xfire/baseline/` directly)_ |
 | `ContextBuilder` | Constructor: `analysis_config: AnalysisConfig` | `context_depth`, `max_related_files`, `include_test_files` |
 | `IntentInferrer` | Constructor: `repo_config: RepoConfig` | `purpose`, `intended_capabilities`, `sensitive_paths` |
 | `ReviewEngine` | Constructor: `settings: CrossFireSettings` | `settings.agents` (which are enabled, their AgentConfig) |
@@ -1468,7 +1468,7 @@ Fallback: await asyncio.wait_for(
 
 ## 5. Recent Additions (Feb 2026)
 
-### Live Terminal UI (`crossfire/cli_ui.py`)
+### Live Terminal UI (`xfire/cli_ui.py`)
 
 All pipeline commands now show a live phase-by-phase status display using `rich.live.Live`.
 
@@ -1483,7 +1483,7 @@ All pipeline commands now show a live phase-by-phase status display using `rich.
 - `debug_mode=True` appends a live-log section showing last 8 structlog events from a ring buffer
 - `processor()` method slots into structlog processor chain: buffers events (debug) and raises `structlog.DropEvent()` to suppress stdout during pipeline
 
-**`AgentTestUI`** — `transient=True` Live display for `crossfire test-llm`:
+**`AgentTestUI`** — `transient=True` Live display for `xfire test-llm`:
 - Per-agent `set_testing(name)` / `set_done(name, ok, msg)` called from async test coroutines
 - Disappears after completion; results rendered as a hacker-styled cyan table
 
@@ -1502,7 +1502,7 @@ structlog.configure(processors=processors, ...)
 
 ---
 
-### Debate Chat Renderer (`crossfire/output/debate_view.py`)
+### Debate Chat Renderer (`xfire/output/debate_view.py`)
 
 `render_debates(report, console)` renders all `DebateRecord` objects as a terminal chat.
 
@@ -1514,16 +1514,16 @@ Layout:
 - Consensus box: `Panel` colored by outcome — confirmed=red, rejected=green, modified/inconclusive=yellow
 
 Used by:
-- `crossfire debates --input results.json` — replays a saved JSON result as a full chat transcript
+- `xfire debates --input results.json` — replays a saved JSON result as a full chat transcript
 - `HackerUI` internally (when `--debate` is passed to pipeline commands) imports `_bubble()`, `_CONSENSUS_CONFIG`, `_SEVERITY_STYLE`, and `_RESPONSE_INDENT` for live streaming above the Live area
 
 ---
 
-### Debug Log Writer (`crossfire/output/debug_log.py`)
+### Debug Log Writer (`xfire/output/debug_log.py`)
 
 `DebugCollector` is a thread-safe structlog processor that buffers all pipeline events in memory.
 
-`write_debug_markdown(report, collector, command_info)` writes `crossfire-debug-YYYYMMDD-HHMMSS.md` to the current working directory, containing:
+`write_debug_markdown(report, collector, command_info)` writes `xfire-debug-YYYYMMDD-HHMMSS.md` to the current working directory, containing:
 1. Pipeline events table (time, level, event, extras)
 2. Intent profile (purpose, capabilities, trust boundaries, security controls, sensitive paths)
 3. Context summary (files changed, directory structure excerpt, README excerpt)
@@ -1533,7 +1533,7 @@ Used by:
 
 ---
 
-### Heuristic-First Intent Inference (`crossfire/core/intent_inference.py`)
+### Heuristic-First Intent Inference (`xfire/core/intent_inference.py`)
 
 Intent inference now always runs the heuristic engine first, then optionally enriches with an LLM.
 
@@ -1564,13 +1564,13 @@ on LLM failure: return heuristic (zero wasted work)
 
 ---
 
-### Auth Store (`crossfire/auth/store.py`)
+### Auth Store (`xfire/auth/store.py`)
 
-`AuthStore` is a Pydantic model persisted at `.crossfire/auth.json`. Stores OAuth tokens and CLI credentials per provider (claude, codex, gemini).
+`AuthStore` is a Pydantic model persisted at `.xfire/auth.json`. Stores OAuth tokens and CLI credentials per provider (claude, codex, gemini).
 
 CLI commands:
-- `crossfire auth login --provider <name> [--token <val>]`
-- `crossfire auth status`
+- `xfire auth login --provider <name> [--token <val>]`
+- `xfire auth status`
 
 ---
 
@@ -1578,10 +1578,10 @@ CLI commands:
 
 | Addition | Description |
 |----------|-------------|
-| `crossfire test-llm` | Tests connectivity for every configured agent; shows mode (cli/api), model, latency, pass/fail |
-| `crossfire auth login` | OAuth login or token store for a provider |
-| `crossfire auth status` | Shows auth state for all providers |
-| `crossfire debates --input` | Re-renders debate chat from a saved JSON result file |
-| `--debug` (pipeline cmds) | Shows live log display + writes `crossfire-debug-*.md` to CWD |
+| `xfire test-llm` | Tests connectivity for every configured agent; shows mode (cli/api), model, latency, pass/fail |
+| `xfire auth login` | OAuth login or token store for a provider |
+| `xfire auth status` | Shows auth state for all providers |
+| `xfire debates --input` | Re-renders debate chat from a saved JSON result file |
+| `--debug` (pipeline cmds) | Shows live log display + writes `xfire-debug-*.md` to CWD |
 | `--silent` (pipeline cmds) | Suppresses all output (structlog → `/dev/null`) |
 | `--debate` (pipeline cmds) | Streams live debate chat as each agent responds — shows severity badge, judge questions, and consensus verdict in real time |
