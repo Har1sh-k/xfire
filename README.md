@@ -8,6 +8,7 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
 [![License: GPL v3](https://img.shields.io/badge/license-GPLv3-blue)](https://github.com/Har1sh-k/xfire/blob/main/LICENSE)
 [![Substack](https://img.shields.io/badge/substack-subscribe-orange?logo=substack)](https://harishkolla.substack.com/)
+[![ClawHub](https://img.shields.io/badge/%F0%9F%A6%9E_ClawHub-xFire_Security_PR_Review-orange)](https://clawhub.ai/Har1sh-k/xfire-security-review)
 
 </div>
 
