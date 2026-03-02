@@ -19,7 +19,7 @@ You will receive acknowledgment within 48 hours and a resolution timeline within
 
 ## Scope
 
-Security issues relevant to CrossFire include:
+Security issues relevant to xFire include:
 
 - **Prompt injection** — attacks that cause agent outputs to be manipulated via crafted code or PR content
 - **Credential leakage** — API keys, tokens, or auth credentials exposed in logs, output, or storage
@@ -31,7 +31,7 @@ Security issues relevant to CrossFire include:
 
 ## Security design notes
 
-CrossFire is designed to analyse potentially malicious code. It implements several protections:
+xFire is designed to analyse potentially malicious code. It implements several protections:
 
 - **Prompt injection guards** — all external data (GitHub PR content, code files, agent outputs) is wrapped in tagged blocks before being included in prompts. See `xfire/agents/prompts/guardrails.py`.
 - **Subprocess safety** — agent CLI calls use `asyncio.create_subprocess_exec()` with argument lists, never `shell=True`.

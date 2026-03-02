@@ -1,9 +1,24 @@
 # Changelog
 
-All notable changes to xfire will be documented in this file.
+All notable changes to xFire will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [0.1.3] - 2026-03-01
+
+### Added
+
+- New `docs/debate-engine.md` — deep reference for debate routing, silent dissent, budget tiers, consensus algorithm, evidence scoring, and configuration
+- Architecture doc sections 9–13: intent inference signal reference, skills framework guide, error handling & fault tolerance, SARIF output format, policy engine & suppression rules
+- Documented `xfire/agents/tools.py` (agent tool schemas) and `xfire/core/cache.py` (orphaned cache layer) in component inventory
+
+### Changed
+
+- Consistent xFire branding across all docs, README, CONTRIBUTING, SECURITY, CODE_OF_CONDUCT
+- README rewritten with ASCII pipeline diagram, feature table, documentation index
+- Fixed finding category group count (7 → 8) and Pydantic model count (25+ → 23) in architecture doc
+- Fixed FastModel model ID to full form `claude-haiku-4-5-20251001` in architecture doc
 
 ## [0.1.2] - 2026-02-28
 
@@ -62,6 +77,7 @@ Initial public release.
 - Auth tokens isolated in `.xfire/auth.json` (gitignored)
 - Structural prompt injection guards in `xfire/agents/prompts/guardrails.py`
 
+[0.1.3]: https://github.com/Har1sh-k/xfire/releases/tag/v0.1.3
 [0.1.2]: https://github.com/Har1sh-k/xfire/releases/tag/v0.1.2
 [0.1.1]: https://github.com/Har1sh-k/xfire/releases/tag/v0.1.1
 [0.1.0]: https://github.com/Har1sh-k/xfire/releases/tag/v0.1.0

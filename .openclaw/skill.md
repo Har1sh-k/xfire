@@ -12,11 +12,11 @@ metadata:
     primaryEnv: ANTHROPIC_API_KEY
 ---
 
-# xfire — Multi-Agent Adversarial Security Review
+# xFire — Multi-Agent Adversarial Security Review
 
 **Multiple agents. One verdict. Zero blind spots.**
 
-xfire sends your code to 3 AI agents (Claude, Codex, Gemini) independently, then runs an adversarial debate where they cross-examine each other's findings. Only vulnerabilities that survive prosecution, defense, and a judge's ruling make the final report.
+xFire sends your code to 3 AI agents (Claude, Codex, Gemini) independently, then runs an adversarial debate where they cross-examine each other's findings. Only vulnerabilities that survive prosecution, defense, and a judge's ruling make the final report.
 
 ## When to Use
 
@@ -380,7 +380,7 @@ fast_model:
 ### GitHub Actions
 
 ```yaml
-name: xfire Security Review
+name: xFire Security Review
 on:
   pull_request:
     types: [opened, synchronize]
@@ -397,7 +397,7 @@ jobs:
 
       - run: pip install xfire
 
-      - name: Run xfire security review
+      - name: Run xFire security review
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

@@ -2,7 +2,7 @@
 
 ## Finding Model
 
-Every xfire finding includes:
+Every xFire finding includes:
 
 | Field | Type | Description |
 |-------|------|-------------|

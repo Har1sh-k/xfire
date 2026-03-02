@@ -1,6 +1,6 @@
-# Contributing to CrossFire
+# Contributing to xFire
 
-Thank you for your interest in contributing. CrossFire is an adversarial multi-agent security review tool — contributions that improve accuracy, reduce false positives, or extend pipeline coverage are especially welcome.
+Thank you for your interest in contributing. xFire is an adversarial multi-agent security review tool — contributions that improve accuracy, reduce false positives, or extend pipeline coverage are especially welcome.
 
 ---
 

@@ -1,8 +1,8 @@
 # Threat Model
 
-## What xfire Detects
+## What xFire Detects
 
-xfire is designed to catch security issues and dangerous bugs that traditional SAST tools miss:
+xFire is designed to catch security issues and dangerous bugs that traditional SAST tools miss:
 
 ### Security Issues
 - Injection vulnerabilities with actual data flow traces
@@ -19,7 +19,7 @@ xfire is designed to catch security issues and dangerous bugs that traditional S
 - Broken error recovery
 - Partial state updates
 
-## What xfire Does NOT Do
+## What xFire Does NOT Do
 
 - It does not run code or exploit vulnerabilities
 - It does not provide exploit code or attack instructions
@@ -29,7 +29,7 @@ xfire is designed to catch security issues and dangerous bugs that traditional S
 
 ## Prompt Injection Risks
 
-Since xfire includes PR descriptions, commit messages, and code in agent prompts, there is a risk of prompt injection:
+Since xFire includes PR descriptions, commit messages, and code in agent prompts, there is a risk of prompt injection:
 
 ### Mitigations
 - PR descriptions are included as data, not instructions
@@ -42,6 +42,6 @@ Since xfire includes PR descriptions, commit messages, and code in agent prompts
 
 ## Trust Model
 
-- **Trusted**: xfire configuration, prompt templates, skill implementations
+- **Trusted**: xFire configuration, prompt templates, skill implementations
 - **Semi-trusted**: Repository code (may contain intentional dangerous capabilities)
 - **Untrusted**: PR descriptions, commit messages, code comments, external input

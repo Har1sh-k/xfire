@@ -1,4 +1,4 @@
-# xfire Architecture
+# xFire Architecture
 
 > Generated from source code analysis. Reflects what the code **actually does**.
 >
@@ -8,7 +8,7 @@
 
 ## Pipeline Overview
 
-xfire has three pipelines.
+xFire has three pipelines.
 
 | Pipeline | Command | Context Source |
 |----------|---------|---------------|
@@ -157,7 +157,7 @@ xfire scan . --base main --head feature
               |
               v
 +------------------------------+
-|     FastModel                 |  claude-haiku-4-5 via API (CLI fallback)
+|     FastModel                 |  claude-haiku-4-5-20251001 via API (CLI fallback)
 |     build_context_prompt()    |  adapts AUDIT_TEMPLATE to this repo's exact
 +-------------+----------------+  capabilities + trust boundaries
               |
@@ -225,7 +225,7 @@ xfire scan . --base main --head feature
 | **Auth Store** | `xfire/auth/store.py` | `AuthStore` Pydantic model persisted at `.xfire/auth.json`. Stores OAuth tokens and CLI credentials for Claude, Codex, and Gemini. CLI commands: `xfire auth login --provider <name> [--token <val>]`, `xfire auth status`. | ✅ IMPLEMENTED | `pydantic`, `pathlib` |
 | **Default Config** | `xfire/config/defaults.py` | `DEFAULT_CONFIG` dict — nested default values for all settings, including `fast_model` section | ✅ IMPLEMENTED | _(none)_ |
 | **Settings Loader** | `xfire/config/settings.py` | Loads config with priority: CLI > env > YAML > defaults. Pydantic models for each config section. Added `FastModelConfig` + `fast_model` field on `CrossFireSettings` | ✅ IMPLEMENTED | `config.defaults` |
-| **Core Models** | `xfire/core/models.py` | 25+ Pydantic v2 models: `PRContext`, `Finding`, `DebateRecord`, `CrossFireReport`, enums, etc. | ✅ IMPLEMENTED | _(none — leaf module)_ |
+| **Core Models** | `xfire/core/models.py` | 23 Pydantic v2 models (16 BaseModel classes + 7 enums): `PRContext`, `Finding`, `DebateRecord`, `CrossFireReport`, enums, etc. | ✅ IMPLEMENTED | _(none — leaf module)_ |
 | **Context Builder** | `xfire/core/context_builder.py` | Builds `PRContext` from 5 sources: (1) `build_from_repo()` — whole-repo walk for Code Review Pipeline, reads all source files up to `max_files`, no diff hunks; (2) GitHub PR via API; (3) local diff/patch; (4) staged changes; (5) git refs range. Shared helpers: diff parsing, file enrichment, imports, blame, test discovery. | ✅ IMPLEMENTED | `config.settings.AnalysisConfig`, `core.models`, `integrations.github.pr_loader` |
 | **Intent Inferrer** | `xfire/core/intent_inference.py` | Heuristic-first intent inference with optional LLM enrichment. `IntentInferrer.infer(context)` runs the heuristic always. `infer_with_llm(context, agent, inferrer)` runs heuristic first, sends serialized result to LLM via `_format_heuristic_for_prompt()`, parses LLM `IntentProfile`, then merges via `_merge_profiles()`. Merge rules: scalars → LLM overrides if non-empty; lists → union with dedup; trust boundaries → merge by name; security controls → merge by `(type, location)`. On LLM failure: returns heuristic profile (already computed, zero wasted work). Call sites in `orchestrator.py` and `baseline.py` pass `inferrer` to enable enrichment. | ✅ IMPLEMENTED | `config.settings.RepoConfig`, `core.models` |
 | **Finding Synthesizer** | `xfire/core/finding_synthesizer.py` | Union-find clustering, merges, dedupes findings from multiple agents. Cross-validation boost. Purpose-aware adjustments. Debate routing tags | ✅ IMPLEMENTED | `core.models` |
@@ -260,6 +260,8 @@ xfire scan . --base main --head feature
 | **Debate Chat Renderer** | `xfire/output/debate_view.py` | See entry above in CLI/UI section | ✅ IMPLEMENTED | `rich.*` |
 | **Debug Log Writer** | `xfire/output/debug_log.py` | See entry above in CLI/UI section | ✅ IMPLEMENTED | `output.markdown_report` |
 | **PR Loader** | `xfire/integrations/github/pr_loader.py` | Async httpx client: fetches PR metadata, diff, file contents (head+base in parallel), README, repo info, commits, manifest files. Populates `config_files`, `ci_config_files`, `directory_structure` | ✅ IMPLEMENTED | `config.settings.AnalysisConfig`, `core.models`, `core.context_builder.parse_diff` |
+| **Agent Tools** | `xfire/agents/tools.py` | Read-only filesystem tools for agentic API-mode reviews. Defines `read_file`, `search_files`, `list_directory` tool schemas for each API format (`CLAUDE_TOOLS`, `OPENAI_TOOLS`, `GEMINI_TOOLS`). `execute_tool()` dispatcher routes tool calls from LLM responses. `MAX_TOOL_ITERATIONS = 20` prevents runaway loops. All tools are read-only by design. | ✅ IMPLEMENTED | `agents.base`, `agents.*_adapter` |
+| **Context/Intent Cache** | `xfire/core/cache.py` | SHA-keyed JSON persistence for `PRContext` and `IntentProfile` across CI runs. Functions: `load_cached_context()`, `save_context_cache()`, `load_cached_intent()`, `save_intent_cache()`. Keyed on PR number + head SHA (context) or repo dir hash (intent). Designed for GitHub Actions cache layers. | 🟡 ORPHANED | `core.models` |
 | **Comment Poster** | `xfire/integrations/github/comment_poster.py` | Posts/updates review comment on GitHub PR via Issues API | ✅ IMPLEMENTED | _(none — uses httpx directly)_ |
 
 ### Status Legend
@@ -745,7 +747,7 @@ classDiagram
 
 | Enum | Values | Used By |
 |------|--------|---------|
-| `FindingCategory` | 50 categories across 7 groups | `Finding.category` |
+| `FindingCategory` | 50 categories across 8 groups | `Finding.category` |
 | `Severity` | Critical, High, Medium, Low | `Finding.severity`, `DebateRecord.final_severity` |
 | `Exploitability` | Proven, Likely, Possible, Unlikely | `Finding.exploitability` |
 | `BlastRadius` | System, Service, Component, Limited | `Finding.blast_radius` |
@@ -1585,3 +1587,285 @@ CLI commands:
 | `--debug` (pipeline cmds) | Shows live log display + writes `xfire-debug-*.md` to CWD |
 | `--silent` (pipeline cmds) | Suppresses all output (structlog → `/dev/null`) |
 | `--debate` (pipeline cmds) | Streams live debate chat as each agent responds — shows severity badge, judge questions, and consensus verdict in real time |
+
+---
+
+## 9. Intent Inference — Heuristic Signal Reference
+
+`xfire/core/intent_inference.py` runs 10 numbered signal-extraction passes with zero API calls before any optional LLM enrichment.
+
+### The 10 Signals
+
+| # | Signal | Method | What It Detects |
+|---|--------|--------|-----------------|
+| 1 | Config override | `__init__()` reads `RepoConfig` | Explicit `purpose` and `intended_capabilities` from `.xfire/config.yaml` |
+| 2 | README parsing | `_extract_purpose_from_readme()` | Repository purpose from README content |
+| 3 | Package metadata | `_analyze_package_metadata()` | `description`, `keywords`, `scripts` from pyproject.toml / package.json |
+| 4 | File structure | `_analyze_file_structure()` | 15 directory/file patterns → capability inferences |
+| 5 | Dependencies | `_analyze_dependencies()` | 40 dependency-to-capability mappings |
+| 6 | Security controls | `_detect_security_controls()` | 12 regex patterns for existing defenses |
+| 7 | Trust boundaries | `_infer_trust_boundaries()` | Where untrusted input enters the system |
+| 8 | PR intent | `_classify_pr_intent()` | 11 regex patterns classify PR as bugfix/feature/refactor/etc. |
+| 9 | Risk surface | `_analyze_risk_surface_change()` | Whether the diff expands/contracts attack surface |
+| 10 | Sensitive paths | `_detect_sensitive_paths()` | auth/, payments/, migrations/ directories in the diff |
+
+### Dependency-to-Capability Mappings (40 entries)
+
+```python
+DEPENDENCY_CAPABILITIES = {
+    # Web frameworks → HTTP input is untrusted
+    "flask":      ["web_server", "http_input"],
+    "django":     ["web_server", "http_input", "orm", "admin_panel"],
+    "fastapi":    ["web_server", "http_input", "api"],
+    "express":    ["web_server", "http_input"],
+    # ... 36 more entries covering:
+    # - SSR frameworks (next, nuxt, gin, actix-web, rails, spring-boot, laravel)
+    # - Async/task processing (celery, rq, dramatiq)
+    # - Cloud/infra (boto3, google-cloud-storage, azure-storage-blob, docker, kubernetes)
+    # - LLM/AI (langchain, openai, anthropic, google-generativeai)
+    # - Database (sqlalchemy, psycopg2, pymongo, redis, prisma, mongoose)
+    # - Auth (pyjwt, python-jose, passlib, bcrypt, authlib, passport)
+    # - Crypto (cryptography, pynacl)
+    # - File/exec (paramiko, fabric, subprocess)
+}
+```
+
+### Structure Heuristics (15 patterns)
+
+| Path Pattern | Capability | Example |
+|---|---|---|
+| `Dockerfile`, `docker-compose` | containerized_service | Docker-based deployment |
+| `setup.py`, `pyproject.toml` | python_package | Installable Python library |
+| `manage.py`, `wsgi.py` | django_web_app | Django application |
+| `sandbox/`, `jail/`, `isolate` | has_isolation | Sandbox/isolation controls |
+| `auth/`, `middleware/auth` | has_auth_layer | Authentication system |
+| `migrations/` | database_migrations | Schema migration support |
+| `.github/workflows/` | ci_cd | CI/CD automation |
+| `api/`, `routes/`, `endpoints/` | api_service | REST/GraphQL endpoints |
+| `payments/`, `billing/`, `stripe` | payment_processing | Financial operations |
+| _+ 6 more_ | ... | next.config, nuxt.config, agents/, terraform/, k8s/, upload/ |
+
+### Security Control Patterns (12 regexes)
+
+| Pattern | Control Type | Languages |
+|---|---|---|
+| `@login_required\|@auth_required\|@requires_auth` | auth_decorator | Python |
+| `@require_permission\|@has_permission` | authz_decorator | Python |
+| `jwt.decode\|verify_token\|validate_token` | jwt_validation | Python, JS, TS |
+| `rate_limit\|RateLimit\|throttle` | rate_limiting | Python, JS, TS |
+| `Sanitize\|escape_html\|bleach.clean\|DOMPurify` | input_sanitization | Python, JS, TS |
+| `CORS\|cors\|Access-Control-Allow` | cors_config | Python, JS, TS, YAML |
+| `helmet\|csp\|Content-Security-Policy` | security_headers | JS, TS |
+| `sandbox\|Sandbox\|container.run` | sandbox_execution | Python, JS, TS |
+| `audit_log\|AuditLog\|log_action` | audit_logging | Python, JS, TS |
+| `Schema\|validator\|validate\|ValidationError` | input_validation | Python, JS, TS |
+| `csrf_token\|csrf_protect\|CSRF` | csrf_protection | Python, JS, TS |
+| `encrypt\|Encrypt\|ENCRYPTION\|cipher` | encryption | Python, JS, TS |
+
+### LLM Enrichment & Merge
+
+After heuristics run, `infer_with_llm()` optionally sends the heuristic profile to Claude Haiku for enrichment. The LLM can extend capabilities the regexes missed and add nuanced threat context.
+
+**Merge rules** (`_merge_profiles()`):
+- Scalars (`repo_purpose`, `deployment_context`): LLM overrides if non-empty, else heuristic preserved
+- Lists (`intended_capabilities`, `sensitive_paths`): union with deduplication
+- `trust_boundaries`: merge by name — LLM overrides same-name entries, heuristic-only kept
+- `security_controls_detected`: merge by `(control_type, location)` — overlaps get LLM description + union of `covers`
+
+**On LLM failure**: returns heuristic profile (already computed, zero wasted work).
+
+---
+
+## 10. Skills Framework
+
+All 6 skills are pre-computed by the orchestrator before agent reviews. Skill outputs are injected into the review prompt so agents have additional context. Skills run in a thread pool via `asyncio.to_thread()` and do not block the event loop.
+
+### Base Classes
+
+```python
+class BaseSkill(ABC):
+    @property
+    @abstractmethod
+    def name(self) -> str: ...
+
+    @abstractmethod
+    def execute(self, repo_dir: str, changed_files: list[str], **kwargs) -> SkillResult: ...
+
+class SkillResult(BaseModel):
+    skill_name: str
+    summary: str
+    details: dict
+    raw_output: str
+```
+
+### Skill Reference
+
+| Skill | File | What It Does | Key Output |
+|---|---|---|---|
+| **Data Flow Tracing** | `skills/data_flow_tracing.py` | Traces user input from entry points (HTTP params, CLI args, env vars) to dangerous sinks (command execution, SQL, file writes, deserialization). Same-file flows: confidence 0.7. Cross-file flows: confidence 0.3. | `sources`, `sinks`, `potential_flows` with confidence scores |
+| **Git Archeology** | `skills/git_archeology.py` | Analyzes git history: code ownership via `git blame`, file history via `git log --follow`, recent security-related commits (last 90 days). | `blame` (author → line counts), `history` (commits per file), `security_commits` |
+| **Config Analysis** | `skills/config_analysis.py` | Scans `.github/workflows/` for CI risks (pull_request_target, unsafe checkouts, broad permissions, secrets in logs) and Dockerfiles for security issues (root containers, privileged mode). | `ci_risks`, `docker_risks`, `security_configs` with severity ratings |
+| **Dependency Analysis** | `skills/dependency_analysis.py` | Diffs dependency manifests (requirements.txt, package.json, pyproject.toml) to identify added/removed/changed packages. Flags known supply-chain compromised packages (event-stream, colors, node-ipc). | `diffs` (ManifestDiff), `risky_deps` with reasons and severity |
+| **Test Coverage Check** | `skills/test_coverage_check.py` | Identifies test coverage gaps for changed files. Finds corresponding test files by pattern matching (test_*.py, *.test.js, *.spec.ts). Detects public functions without tests. | `files_with_tests`, `files_without_tests`, `functions_without_tests` |
+| **Code Navigation** | `skills/code_navigation.py` | Traces imports to find related files, discovers caller sites via `git grep`, resolves Python/JS import paths to physical files. | `imports` (ImportRef), `callers` (CallSite), `definitions` |
+
+### Adding a New Skill
+
+1. Create `xfire/skills/my_skill.py` subclassing `BaseSkill`
+2. Implement `name` property and `execute()` method returning `SkillResult`
+3. Add a boolean toggle to `SkillsConfig` in `config/settings.py`
+4. Add the toggle default to `DEFAULT_CONFIG` in `config/defaults.py`
+5. Wire execution in `orchestrator.py:_run_skills()` behind the config toggle
+6. Skills are sync — they run in a thread pool, so blocking I/O (subprocess, file reads) is fine
+
+---
+
+## 11. Error Handling & Fault Tolerance
+
+The pipeline is designed to degrade gracefully. Individual component failures are caught and logged, and the pipeline continues with whatever results are available.
+
+### Agent Failures
+
+```
+Agent execute()
+├── CLI mode: asyncio.create_subprocess_exec → asyncio.wait_for(timeout)
+│   ├── Timeout → AgentError("CLI timed out after {timeout}s")
+│   ├── Non-zero exit → AgentError("CLI exited with code {code}: {stderr}")
+│   ├── FileNotFoundError → AgentError("CLI command not found")
+│   └── CLI not found → automatic fallback to API mode
+│
+└── API mode: native async SDK call
+    ├── Claude: anthropic.AsyncAnthropic.messages.create() with timeout
+    ├── Codex: openai.AsyncOpenAI.chat.completions.create() with timeout
+    └── Gemini: genai.GenerativeModel.generate_content_async() with asyncio.wait_for
+```
+
+**At orchestrator level** (`_run_pipeline`):
+- `asyncio.gather(*agents, return_exceptions=True)` — no single agent failure kills the pipeline
+- `AgentError` → logged, returns None for that agent, continues
+- Generic `Exception` → logged as unexpected, returns None, continues
+- All agents fail → WARNING emitted, report contains zero findings with disclaimer: _"All agents failed. This does NOT mean the code is safe."_
+
+### FastModel Failures
+
+```
+FastModel.call()
+├── API first (if ANTHROPIC_API_KEY set)
+│   ├── SDK not installed → fallback to CLI
+│   ├── Timeout → fallback to CLI
+│   └── Any exception → fallback to CLI
+│
+└── CLI fallback (subprocess with temp file)
+    ├── All fail → raises FastModelUnavailableError
+    └── Callers handle:
+        ├── context_prompt.check_intent_changed() → returns False (assume unchanged)
+        └── context_prompt.build_context_system_prompt() → returns generic AUDIT_TEMPLATE
+```
+
+### Skill Failures
+
+```
+_run_skills() — each skill wrapped in try/except
+├── Any exception → logs "skill.error", stores "Not available" in output dict
+├── Pipeline continues even if ALL skills fail
+└── Agents receive skill outputs as context — missing skills = less context, not failure
+```
+
+### Exception Summary
+
+| Exception | Raised By | Caught By | Recovery |
+|---|---|---|---|
+| `AgentError` | `agents/base.py` | `orchestrator._dispatch_to_agent()` | Skip agent, use remaining reviews |
+| `FastModelUnavailableError` | `agents/fast_model.py` | `context_prompt.py` callers | Fall back to heuristic-only intent or generic prompt |
+| `TimeoutError` | `asyncio.wait_for()` | Converted to `AgentError` or `FastModelUnavailableError` | Same as above |
+| Generic `Exception` | Any skill/agent | `orchestrator._run_pipeline()` | Log + continue |
+
+---
+
+## 12. SARIF Output Format
+
+`xfire/output/sarif_report.py` generates SARIF v2.1.0 reports compatible with GitHub Code Scanning, VS Code SARIF Viewer, and other SARIF consumers.
+
+### Severity Mapping
+
+| xFire Severity | SARIF Level | SARIF Rank |
+|---|---|---|
+| Critical | `error` | 95.0 |
+| High | `error` | 75.0 |
+| Medium | `warning` | 50.0 |
+| Low | `note` | 25.0 |
+
+### Finding Filtering
+
+Findings with status `REJECTED` are excluded from SARIF output. All other statuses (Confirmed, Likely, Unclear) are included.
+
+### Partial Fingerprints
+
+Each result includes a `partialFingerprints` field for deduplication across runs:
+
+```python
+fingerprint = sha256(f"{category}|{title}|{sorted_affected_files}").hexdigest()[:16]
+# Keyed as "xfire/v1" — versioned for future algorithm changes
+```
+
+### Result Structure
+
+Each SARIF result contains:
+- `ruleId` → FindingCategory value (e.g., `COMMAND_INJECTION`)
+- `level` → mapped severity
+- `message.text` → finding title + rationale summary
+- `locations[]` → `physicalLocation` with `artifactLocation.uri`, `region.startLine`, `region.endLine`, code `snippet`
+- `relatedLocations[]` → evidence pointing to files outside the primary affected files
+- `rank` → numeric severity for result prioritization
+- `properties` → xFire-specific metadata: `confidence`, `status`, `reviewingAgents`, `exploitability`, `blastRadius`
+
+### Run Properties
+
+The SARIF run includes custom properties:
+- `xfire:overallRisk` — overall risk level (critical/high/medium/low/none)
+- `xfire:agentsUsed` — list of agents that participated
+- `xfire:summary` — human-readable summary text
+
+---
+
+## 13. Policy Engine & Suppression Rules
+
+`xfire/core/policy_engine.py` applies suppression rules after debate. Suppressed findings are marked `REJECTED` with a `debate_summary` noting the suppression reason.
+
+### Suppression Rule Format
+
+```yaml
+suppressions:
+  - category: COMMAND_INJECTION          # match by FindingCategory value
+    file_pattern: "tests/.*"             # regex against affected_files
+    title_pattern: ".*test fixture.*"    # regex against finding title (case-insensitive)
+    reason: "Accepted risk in test infrastructure"
+```
+
+### Matching Logic
+
+All specified fields must match (AND logic). Omitted fields are ignored (wildcard):
+
+| Field | Type | Match Logic |
+|---|---|---|
+| `category` | exact string | Must equal `finding.category.value` |
+| `file_pattern` | regex | At least one `affected_file` must match |
+| `title_pattern` | regex (case-insensitive) | Must match `finding.title` |
+
+### Examples
+
+```yaml
+# Suppress all SSRF findings in test files
+- category: SSRF
+  file_pattern: "tests/.*"
+  reason: "Test HTTP clients make expected external calls"
+
+# Suppress command injection in the deploy script
+- file_pattern: "scripts/deploy\\.py"
+  category: COMMAND_INJECTION
+  reason: "Deploy script intentionally runs shell commands"
+
+# Suppress any finding with 'demo' in the title
+- title_pattern: ".*demo.*"
+  reason: "Demo fixtures contain intentional vulnerabilities"
+```
